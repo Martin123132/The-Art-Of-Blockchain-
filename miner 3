@@ -1,0 +1,106 @@
+import numpy as np
+import hashlib, struct, math, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+
+# ----- CONFIG -----
+VERSION, TIMESTAMP, BITS = 0x20000000, int(time.time()), int("17060a63", 16)
+PREV_HASH = "0000000000000000000113bb83fdc02b6e2be0b729703235add4b9e1f7a4f519"
+MERKLE = "0318e2035c20d51ea9de9c04e374f7f1ee7c9b3c4ed2d3e133ed7e1425706533"
+
+def bits_to_target(bits):
+    exp = bits >> 24
+    mant = bits & 0xffffff
+    return mant * (1 << (8 * (exp - 3)))
+TARGET = bits_to_target(BITS)
+
+BLOCKS, FAMS, AGENTS, GENS = 24, 10, 500000, 400  # More blocks, more agents, more generations (for overnight run)
+ANCHOR_NONCE, START_HEIGHT = 1250000000, 820000
+SEED_VEC = [ANCHOR_NONCE + np.random.randint(-2**9, 2**9) for _ in range(FAMS)]
+
+LOG_PATH = "mbt_ultraswarm_chain.log"
+
+chain = []
+SURFACE_MAP = np.zeros((BLOCKS, GENS))
+FITNESS = {f: [0.25, 0.25, 0.25] for f in range(FAMS)}
+STREAK = [0 for _ in range(FAMS)]
+FATIGUE = [0 for _ in range(FAMS)]
+LOCK = threading.Lock()
+
+def sha256d(data): return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+def hash_to_int(h): return int.from_bytes(h, 'big')
+def build_header(v, p, m, t, b, n):
+    return (
+        struct.pack("<L", v) +
+        bytes.fromhex(p)[::-1] +
+        bytes.fromhex(m)[::-1] +
+        struct.pack("<L", t) +
+        struct.pack("<L", b) +
+        struct.pack("<L", n)
+    )
+
+def compute_pitch(b_idx):
+    # Linear then flat for now, simple
+    return 0.05 if b_idx < 2 else 1.0
+
+def mine(b_idx, prev_hash):
+    height = START_HEIGHT + b_idx
+    pitch = compute_pitch(b_idx)
+    best = {"val": 2**256, "fam": None, "nonce": None, "header": None, "streak": 0, "fatigue": 0}
+    threads = []
+    pools = [SEED_VEC[f] + np.random.randint(-2**22, 2**22, AGENTS, dtype=np.int64) % 2**32 for f in range(FAMS)]
+
+    def eval_family(fam):
+        boost = max(1.0 - 0.05 * FATIGUE[fam] + 0.05 * STREAK[fam], 0.05)
+        mag = int(boost * 2**22 + 2**20)
+        pool = (pools[fam] + np.random.randint(-mag, mag, AGENTS, dtype=np.int64)) % 2**32
+        best_local, nonce_local, header_local = 2**256, None, None
+        for n in pool:
+            h = build_header(VERSION, prev_hash, MERKLE, TIMESTAMP, BITS, int(n))
+            val = hash_to_int(sha256d(h))
+            if val < best_local:
+                best_local, nonce_local, header_local = val, int(n), h
+        return fam, best_local, nonce_local, header_local, boost
+
+    with ThreadPoolExecutor(max_workers=FAMS) as ex:
+        results = list(ex.map(eval_family, range(FAMS)))
+
+    for fam, val, nonce, header, boost in results:
+        if val < best["val"]:
+            best.update({"val": val, "fam": fam, "nonce": nonce, "header": header, "boost": boost})
+    # Update streak/fatigue
+    for fam in range(FAMS):
+        if fam == best["fam"]:
+            STREAK[fam] += 1
+            FATIGUE[fam] = max(FATIGUE[fam] - 1, 0)
+        else:
+            STREAK[fam] = 0
+            FATIGUE[fam] += 1
+
+    # Record block
+    chain.append({
+        "index": b_idx,
+        "height": height,
+        "winner": best["fam"],
+        "pitch": round(pitch, 3),
+        "boost": round(best["boost"], 2),
+        "streak": STREAK[best["fam"]],
+        "fatigue": FATIGUE[best["fam"]],
+        "hash": f"{best['val']:064x}",
+        "status": "✅" if best["val"] < TARGET else "❌"
+    })
+    # Save progress every block
+    with LOCK:
+        with open(LOG_PATH, "a") as f:
+            f.write(f"Block {b_idx}: Height={height} | Winner={best['fam']} | Pitch={pitch:.3f} | Boost={best['boost']:.2f} | Streak={STREAK[best['fam']]} | Fatigue={FATIGUE[best['fam']]} | Hash=0x{best['val']:064x} | Status={chain[-1]['status']}\n")
+
+# ----- MAIN EXECUTION -----
+prev_hash = PREV_HASH
+with open(LOG_PATH, "w") as f:
+    f.write("-- MBT Ultra Swarm Chain Summary --\n")
+
+for b in range(BLOCKS):
+    mine(b, prev_hash)
+    prev_hash = sha256d(bytes.fromhex(chain[-1]["hash"]))[::-1].hex()
+
+print(f"\n[Run complete: see {LOG_PATH} for full results!]")
