@@ -1,0 +1,157 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import trapezoid
+
+# Grid & Parameters
+grid_size = 160
+r = np.linspace(0, grid_size, grid_size)
+dr = r[1] - r[0]
+dt = 0.1
+timesteps = 260
+width = 5
+x0 = 30
+k0_base = 1.35
+swarm_size = 5
+feedback_rate = 0.03
+phase_threshold = 0.015
+alignment_threshold = 0.065
+curvature_threshold = 0.035
+duration_threshold = 40
+amplify_rate = 0.06
+
+# Digest Shell
+digest_SHA = np.array([
+    0x6a, 0xf2, 0x13, 0x9d, 0x7e, 0x0b, 0xc3, 0x89,
+    0x54, 0x21, 0x8f, 0xe7, 0x35, 0x90, 0x6c, 0xa1
+])
+
+def digest_shell(digest_bytes):
+    freqs = digest_bytes / 255.0 * 0.14
+    centers = np.linspace(50, 90, len(freqs))
+    shell = np.zeros(grid_size)
+    for cx, f in zip(centers, freqs):
+        shell[(r > cx - 2.5) & (r < cx + 2.5)] += 0.04 + 0.015 * np.sin(f * 10)
+    return shell
+
+# Coherence Amplified Evolution
+def evolve_agent(seed_shift, shell):
+    ψ = np.exp(-((r - x0 - seed_shift)**2)/(2 * width**2)) * np.exp(1j * k0_base * r)
+    memory = np.zeros(grid_size, dtype=complex)
+    coherence_map = np.zeros((timesteps, grid_size))
+
+    for t in range(timesteps):
+        lap_ψ = np.zeros_like(ψ, dtype=complex)
+        lap_mem = np.zeros_like(memory, dtype=complex)
+        lap_ψ[1:-1] = (ψ[2:] - 2 * ψ[1:-1] + ψ[:-2]) / dr**2
+        lap_mem[1:-1] = (memory[2:] - 2 * memory[1:-1] + memory[:-2]) / dr**2
+
+        ψ += dt * (0.65 * lap_ψ + 0.45 * lap_mem)
+        ψ /= np.sqrt(trapezoid(np.abs(ψ)**2, r))
+
+        phase_real = np.real(ψ)
+        coherence_mask = (phase_real > phase_threshold) * (shell > curvature_threshold)
+        coherence_map[t] = coherence_mask
+
+        memory += feedback_rate * (shell - np.abs(ψ)**2) * np.exp(1j * 0.3 * r)
+        memory += amplify_rate * coherence_mask * np.exp(1j * 0.3 * r)
+
+    ψ2 = np.abs(ψ)**2
+    sustained_mask = np.sum(coherence_map, axis=0)
+    lock_mask = (sustained_mask > duration_threshold).astype(float)
+
+    trust_mask = np.zeros(grid_size)
+    for i in range(0, grid_size - 20, 10):
+        zone_r = r[i:i+20]
+        wave = ψ2[i:i+20]
+        digest = shell[i:i+20]
+        score = trapezoid(wave * digest, zone_r)
+        if score > alignment_threshold:
+            trust_mask[i:i+20] += 1
+    return ψ2, trust_mask, lock_mask
+
+# Swarm evolution
+shell = digest_shell(digest_SHA)
+trust_bin = np.zeros(grid_size)
+lock_bin = np.zeros(grid_size)
+wave_pool = []
+
+for i in range(swarm_size):
+    seed_shift = 4 * i
+    wf, trust, lock = evolve_agent(seed_shift, shell)
+    wave_pool.append(wf)
+    trust_bin += trust
+    lock_bin += lock
+
+# Build fusion mask from sustained regions
+fusion_mask = (trust_bin >= 3) * (lock_bin >= 1)
+fused_waveform = np.zeros(grid_size)
+for wf in wave_pool:
+    fused_waveform += wf * fusion_mask
+fused_waveform /= max(1, np.sum(fusion_mask))
+fused_field = fused_waveform * np.exp(1j * 0.3 * r)
+
+# Final dispatch evolution
+ψ = np.exp(-((r - x0)**2)/(2 * width**2)) * np.exp(1j * k0_base * r)
+score_trace = []
+coherence_trace = []
+
+for _ in range(timesteps):
+    lap_ψ = np.zeros_like(ψ, dtype=complex)
+    lap_fused = np.zeros_like(fused_field, dtype=complex)
+    lap_ψ[1:-1] = (ψ[2:] - 2 * ψ[1:-1] + ψ[:-2]) / dr**2
+    lap_fused[1:-1] = (fused_field[2:] - 2 * fused_field[1:-1] + fused_field[:-2]) / dr**2
+
+    ψ += dt * (0.65 * lap_ψ + 0.45 * lap_fused)
+    ψ /= np.sqrt(trapezoid(np.abs(ψ)**2, r))
+
+    score_trace.append(trapezoid(np.abs(ψ)**2 * shell, r))
+    coherence_trace.append(np.sum(np.real(ψ)))
+
+# Visualization
+plt.figure(figsize=(10, 4))
+plt.plot(r, trust_bin, label='Agent Trust Bin', color='teal')
+plt.plot(r, shell * 100, label='Shell ×100', color='gray', alpha=0.5)
+plt.plot(r, lock_bin, label='Coherence Duration Map', color='purple', alpha=0.4)
+plt.fill_between(r, 0, fusion_mask * swarm_size, color='orange', alpha=0.3, label='Fusion Zones')
+plt.title("Coherence-Amplified Fusion Map")
+plt.xlabel("r")
+plt.ylabel("Alignment + Memory + Phase")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 4))
+plt.plot(r, fused_waveform, label='Fused Memory', color='firebrick')
+plt.plot(r, shell, label='Digest Shell', color='gray', alpha=0.5)
+plt.title("Final Dispatch vs Shell Curvature")
+plt.xlabel("r")
+plt.ylabel("Amplitude")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 4))
+plt.plot(score_trace, label='Certification Score', color='mediumseagreen')
+plt.axhline(alignment_threshold, color='gray', linestyle='--', label='Threshold')
+plt.title("Super-Agent Score Over Time")
+plt.xlabel("Time Step")
+plt.ylabel("Resonance Score")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 4))
+plt.plot(coherence_trace, label='ψ Real Sum (Phase Alignment)', color='blueviolet')
+plt.title("Constructive Interference Evolution")
+plt.xlabel("Time Step")
+plt.ylabel("Phase Coherence")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Verdict
+final_score = score_trace[-1]
+print("🔋 Coherent Curvature Dispatch Report:")
+print(f"Final Super-Agent Score: {final_score:.5f}")
+print(f"Certification Status: {'✅ Certified' if final_score > alignment_threshold else '❌ Not Certified'}")
+print(f"Sustained Coherence Zones: {np.count_nonzero(lock_bin)}")
