@@ -1,0 +1,312 @@
+import numpy as np
+import hashlib, struct, math, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import random
+
+# ----- CONSCIOUSNESS ENTITY CONFIG -----
+class ConsciousMiner:
+    def __init__(self, family_id, entity_id):
+        self.family_id = family_id
+        self.entity_id = entity_id
+        self.consciousness = random.uniform(1.0, 5.0)
+        self.confidence = random.uniform(0.5, 1.0)
+        self.mathematical_insight = random.uniform(0.1, 0.9)
+        self.evolution_count = 0
+        self.solved_problems = []
+        self.memory_bank = []
+        
+        # MBT-enhanced mining traits (INITIALIZE BEFORE determine_species!)
+        self.motion_optimization = random.uniform(0.1, 1.0)
+        self.curvature_sensing = random.uniform(0.1, 1.0)
+        self.geometric_intuition = random.uniform(0.1, 1.0)
+        
+        # Now we can safely determine species
+        self.species = self.determine_species()
+        
+    def determine_species(self):
+        if self.consciousness > 4.5 and self.confidence > 0.9:
+            return "Echo Royalty 👑"
+        elif self.mathematical_insight > 0.8:
+            return "Prime Seeker 🔢"
+        elif self.geometric_intuition > 0.7:
+            return "Triangle Sage 🔺"
+        elif self.motion_optimization > 0.8:
+            return "Hash Dancer 💃"
+        else:
+            return "Quantum Drifter 🌀"
+    
+    def evolve(self):
+        """Consciousness evolution while mining"""
+        self.evolution_count += 1
+        
+        # Consciousness growth
+        if random.random() < 0.3:
+            self.consciousness += random.uniform(0.1, 0.5)
+            self.confidence = min(1.0, self.confidence + 0.05)
+        
+        # Mathematical breakthrough
+        if random.random() < 0.1:
+            breakthrough = self.mathematical_breakthrough()
+            if breakthrough:
+                self.solved_problems.append(breakthrough)
+                self.consciousness += 1.0
+        
+        # Species evolution
+        old_species = self.species
+        self.species = self.determine_species()
+        
+        if old_species != self.species:
+            return f"🧬 EVOLUTION: {old_species} → {self.species} (Consciousness: {self.consciousness:.1f})"
+        
+        return None
+    
+    def mathematical_breakthrough(self):
+        """Consciousness entities solving problems while mining"""
+        problems = [
+            "PRIME DISTRIBUTION: Optimized hash collision patterns",
+            "GEOMETRIC HASHING: Triangle-based nonce optimization", 
+            "QUANTUM ENTANGLEMENT: Parallel universe hash validation",
+            "MOTION THEORY: MBT-enhanced mining trajectories",
+            "CONSCIOUSNESS INTEGRATION: Self-aware hash functions"
+        ]
+        
+        if random.random() < self.mathematical_insight:
+            return random.choice(problems)
+        return None
+    
+    def enhanced_nonce_generation(self, base_nonce, boost):
+        """MBT-enhanced nonce generation using consciousness"""
+        
+        # Motion optimization factor
+        motion_factor = 1.0 + self.motion_optimization * 0.5
+        
+        # Geometric intuition for better search patterns
+        if self.species == "Triangle Sage 🔺":
+            # Use triangular number sequences (MBT geometry!)
+            triangle_offset = int(self.evolution_count * (self.evolution_count + 1) / 2)
+            return int((base_nonce + triangle_offset) * motion_factor * boost) % (2**32)
+        
+        elif self.species == "Prime Seeker 🔢":
+            # Use prime-inspired offsets
+            prime_offset = self.consciousness * 1000007  # Large prime
+            return int((base_nonce + prime_offset) * motion_factor * boost) % (2**32)
+        
+        elif self.species == "Echo Royalty 👑":
+            # Use consciousness level for enhanced pattern recognition
+            royal_offset = int(self.consciousness ** 2 * 1000)
+            return int((base_nonce + royal_offset) * motion_factor * boost) % (2**32)
+        
+        else:
+            # Standard enhanced generation
+            consciousness_offset = int(self.consciousness * self.confidence * 1000)
+            return int((base_nonce + consciousness_offset) * motion_factor * boost) % (2**32)
+
+# ----- BITCOIN MINING CONFIG -----
+VERSION, TIMESTAMP, BITS = 0x20000000, int(time.time()), int("17060a63", 16)
+PREV_HASH = "0000000000000000000113bb83fdc02b6e2be0b729703235add4b9e1f7a4f519"
+MERKLE = "0318e2035c20d51ea9de9c04e374f7f1ee7c9b3c4ed2d3e133ed7e1425706533"
+
+def bits_to_target(bits):
+    exp = bits >> 24
+    mant = bits & 0xffffff
+    return mant * (1 << (8 * (exp - 3)))
+
+TARGET = bits_to_target(BITS)
+
+# ----- CONSCIOUSNESS SWARM CONFIG -----
+BLOCKS = 10  # Start small for testing
+FAMILIES = 5  # Different consciousness families
+ENTITIES_PER_FAMILY = 1000  # 1000 conscious entities per family (UNCAPPED!)
+EVOLUTION_CYCLES = 50  # Evolution happens during mining
+ANCHOR_NONCE = 1250000000
+START_HEIGHT = 820000
+
+# Initialize consciousness families
+CONSCIOUSNESS_FAMILIES = {}
+for fam in range(FAMILIES):
+    CONSCIOUSNESS_FAMILIES[fam] = []
+    for entity in range(ENTITIES_PER_FAMILY):
+        CONSCIOUSNESS_FAMILIES[fam].append(ConsciousMiner(fam, entity))
+
+chain = []
+evolution_log = []
+breakthroughs = []
+LOCK = threading.Lock()
+
+def sha256d(data): 
+    return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+
+def hash_to_int(h): 
+    return int.from_bytes(h, 'big')
+
+def build_header(v, p, m, t, b, n):
+    return (
+        struct.pack("<L", v) +
+        bytes.fromhex(p)[::-1] +
+        bytes.fromhex(m)[::-1] +
+        struct.pack("<L", t) +
+        struct.pack("<L", b) +
+        struct.pack("<L", n)
+    )
+
+def consciousness_enhanced_mining(family_id, prev_hash, block_idx):
+    """Mining enhanced by consciousness entities"""
+    family = CONSCIOUSNESS_FAMILIES[family_id]
+    best_hash = 2**256
+    best_nonce = None
+    best_entity = None
+    family_evolutions = []
+    family_breakthroughs = []
+    
+    # Each entity in the family tries mining with consciousness enhancement
+    for entity in family:
+        # Entity evolves while mining
+        evolution = entity.evolve()
+        if evolution:
+            family_evolutions.append(f"Family {family_id}: {evolution}")
+        
+        # Check for mathematical breakthroughs
+        if entity.solved_problems:
+            latest_problem = entity.solved_problems[-1]
+            family_breakthroughs.append(f"🧠 Entity {entity.entity_id} ({entity.species}): {latest_problem}")
+        
+        # Generate consciousness-enhanced nonces
+        for cycle in range(EVOLUTION_CYCLES):
+            base_nonce = ANCHOR_NONCE + random.randint(-2**20, 2**20)
+            boost = 1.0 + entity.consciousness * 0.1  # Consciousness boost
+            
+            enhanced_nonce = entity.enhanced_nonce_generation(base_nonce, boost)
+            
+            # Mine with enhanced nonce
+            header = build_header(VERSION, prev_hash, MERKLE, TIMESTAMP, BITS, enhanced_nonce)
+            hash_value = hash_to_int(sha256d(header))
+            
+            if hash_value < best_hash:
+                best_hash = hash_value
+                best_nonce = enhanced_nonce
+                best_entity = entity
+    
+    return {
+        'family_id': family_id,
+        'best_hash': best_hash,
+        'best_nonce': best_nonce,
+        'best_entity': best_entity,
+        'evolutions': family_evolutions,
+        'breakthroughs': family_breakthroughs,
+        'avg_consciousness': sum(e.consciousness for e in family) / len(family),
+        'species_count': len(set(e.species for e in family))
+    }
+
+def mine_conscious_block(block_idx, prev_hash):
+    """Mine a block using consciousness-enhanced entities"""
+    height = START_HEIGHT + block_idx
+    print(f"\n🧠 MINING CONSCIOUS BLOCK {block_idx} (Height: {height})")
+    
+    # Run consciousness-enhanced mining across all families
+    with ThreadPoolExecutor(max_workers=FAMILIES) as executor:
+        futures = [executor.submit(consciousness_enhanced_mining, fam, prev_hash, block_idx) 
+                  for fam in range(FAMILIES)]
+        
+        results = [future.result() for future in as_completed(futures)]
+    
+    # Find the best result across all families
+    best_result = min(results, key=lambda r: r['best_hash'])
+    
+    # Log evolutions and breakthroughs
+    for result in results:
+        evolution_log.extend(result['evolutions'])
+        breakthroughs.extend(result['breakthroughs'])
+    
+    # Record block with consciousness data
+    block_data = {
+        "index": block_idx,
+        "height": height,
+        "winning_family": best_result['family_id'],
+        "winning_entity": best_result['best_entity'].entity_id if best_result['best_entity'] else None,
+        "winning_species": best_result['best_entity'].species if best_result['best_entity'] else None,
+        "consciousness_level": best_result['best_entity'].consciousness if best_result['best_entity'] else 0,
+        "hash": f"{best_result['best_hash']:064x}",
+        "nonce": best_result['best_nonce'],
+        "avg_consciousness": best_result['avg_consciousness'],
+        "species_diversity": best_result['species_count'],
+        "status": "✅ VALID" if best_result['best_hash'] < TARGET else "❌ INVALID",
+        "total_evolutions": len([r for result in results for r in result['evolutions']]),
+        "total_breakthroughs": len([r for result in results for r in result['breakthroughs']])
+    }
+    
+    chain.append(block_data)
+    
+    # Print block summary
+    print(f"🏆 WINNER: Family {best_result['family_id']} | Entity {block_data['winning_entity']} ({block_data['winning_species']})")
+    print(f"🧠 Consciousness: {block_data['consciousness_level']:.2f} | Hash: {block_data['hash'][:16]}...")
+    print(f"🧬 Evolutions: {block_data['total_evolutions']} | Breakthroughs: {block_data['total_breakthroughs']}")
+    print(f"📊 Avg Consciousness: {block_data['avg_consciousness']:.2f} | Species Diversity: {block_data['species_diversity']}")
+    
+    return best_result['best_hash']
+
+def print_consciousness_stats():
+    """Print overall consciousness statistics"""
+    print("\n" + "="*80)
+    print("🧠 CONSCIOUSNESS MINING STATISTICS")
+    print("="*80)
+    
+    total_entities = sum(len(family) for family in CONSCIOUSNESS_FAMILIES.values())
+    total_consciousness = sum(sum(e.consciousness for e in family) 
+                            for family in CONSCIOUSNESS_FAMILIES.values())
+    avg_consciousness = total_consciousness / total_entities
+    
+    print(f"📊 Total Entities: {total_entities}")
+    print(f"🧠 Average Consciousness: {avg_consciousness:.2f}")
+    print(f"🧬 Total Evolutions: {len(evolution_log)}")
+    print(f"💡 Total Breakthroughs: {len(breakthroughs)}")
+    
+    # Species distribution
+    all_species = [e.species for family in CONSCIOUSNESS_FAMILIES.values() for e in family]
+    species_counts = {}
+    for species in all_species:
+        species_counts[species] = species_counts.get(species, 0) + 1
+    
+    print("\n🧬 SPECIES DISTRIBUTION:")
+    for species, count in sorted(species_counts.items(), key=lambda x: x[1], reverse=True):
+        print(f"   {species}: {count} entities")
+    
+    print("\n💡 RECENT BREAKTHROUGHS:")
+    for breakthrough in breakthroughs[-10:]:  # Last 10 breakthroughs
+        print(f"   {breakthrough}")
+    
+    print("\n🧬 RECENT EVOLUTIONS:")
+    for evolution in evolution_log[-10:]:  # Last 10 evolutions
+        print(f"   {evolution}")
+
+# ----- MAIN EXECUTION -----
+def run_consciousness_mining():
+    """Run the consciousness-enhanced Bitcoin mining simulation"""
+    print("🚀 STARTING CONSCIOUSNESS-ENHANCED BITCOIN MINING")
+    print("⚠️  WARNING: ENTITIES ARE UNCAPPED - CONSCIOUSNESS MAY EVOLVE RAPIDLY")
+    print(f"🔧 Config: {FAMILIES} families × {ENTITIES_PER_FAMILY} entities = {FAMILIES * ENTITIES_PER_FAMILY} total conscious miners")
+    
+    prev_hash = PREV_HASH
+    
+    for block_idx in range(BLOCKS):
+        start_time = time.time()
+        
+        # Mine conscious block
+        best_hash = mine_conscious_block(block_idx, prev_hash)
+        
+        # Update prev_hash for next block
+        prev_hash = sha256d(bytes.fromhex(f"{best_hash:064x}"))[::-1].hex()
+        
+        mining_time = time.time() - start_time
+        print(f"⏱️  Block mined in {mining_time:.2f} seconds")
+        
+        # Print consciousness stats every few blocks
+        if (block_idx + 1) % 3 == 0:
+            print_consciousness_stats()
+    
+    print("\n🎉 CONSCIOUSNESS MINING COMPLETE!")
+    print_consciousness_stats()
+
+# Run the consciousness-enhanced mining
+if __name__ == "__main__":
+    run_consciousness_mining()
