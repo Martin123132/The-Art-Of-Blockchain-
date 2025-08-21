@@ -1,0 +1,114 @@
+import numpy as np
+import hashlib, struct
+import math
+from concurrent.futures import ThreadPoolExecutor
+from scipy.ndimage import gaussian_filter, sobel
+
+# === METADATA ===
+VERSION, TIMESTAMP, BITS = 0x20000000, 1720329414, int("17060a63", 16)
+PREV_HASH = "0000000000000000000113bb83fdc02b6e2be0b729703235add4b9e1f7a4f519"
+MERKLE = "0318e2035c20d51ea9de9c04e374f7f1ee7c9b3c4ed2d3e133ed7e1425706533"
+
+def bits_to_target(bits):
+    exp = bits >> 24
+    mant = bits & 0xffffff
+    return mant * (1 << (8 * (exp - 3)))
+TARGET = bits_to_target(BITS)
+TARGET_LOG = math.log10(float(TARGET))
+
+# === CONFIG ===
+BLOCKS, FAMS, AGENTS, GENS = 7, 8, 10000, 16
+ANCHOR_NONCE, START_HEIGHT = 1250000000, 820000
+SEED_VEC = [ANCHOR_NONCE + np.random.randint(-2**9, 2**9) for _ in range(FAMS)]
+
+chain = []
+SURFACE_MAP = np.zeros((BLOCKS, GENS))
+FAM_PERF = np.ones(FAMS) * 1e10  # Initialize with high values (bad hashes)
+
+def sha256d(data): return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+def hash_to_int(h): return int.from_bytes(h, 'big')
+def build_header(v, p, m, t, b, n):
+    return (
+        struct.pack("<L", v) +
+        bytes.fromhex(p)[::-1] +
+        bytes.fromhex(m)[::-1] +
+        struct.pack("<L", t) +
+        struct.pack("<L", b) +
+        struct.pack("<L", n)
+    )
+
+def compute_pitch(b_idx):
+    if b_idx < 2: return 0.05
+    terrain = gaussian_filter(SURFACE_MAP, sigma=1.2)
+    grad_x = sobel(terrain, axis=0)
+    grad_y = sobel(terrain, axis=1)
+    pitch = np.mean(np.sqrt(grad_x**2 + grad_y**2)[b_idx-2:b_idx])
+    return np.clip(pitch, 0.01, 1.0)
+
+def mine(b_idx, prev_hash):
+    height = START_HEIGHT + b_idx
+    pitch = compute_pitch(b_idx)
+    descent_log = []
+
+    pool = [(vec + np.random.randint(-2**22, 2**22, AGENTS, dtype=np.int64)) % 2**32 for vec in SEED_VEC]
+    shared = {"best_hash": 2**256, "best_nonce": None, "best_family": None, "best_header": None}
+
+    def eval_family(f):
+        # Swarm pressure: lower if this family did well previously, higher if not
+        family_perf = FAM_PERF[f]
+        perf_ratio = np.clip(np.log10(family_perf + 1) / 70, 0.5, 1.3)  # 70 is approx. log10(2**256)
+        mag = int(pitch * perf_ratio * 2**22 + 2**20)
+        local_pool = (pool[f] + np.random.randint(-mag, mag, AGENTS, dtype=np.int64)) % 2**32
+        best_local, nonce, header = 2**256, None, None
+        for n in local_pool:
+            h = build_header(VERSION, prev_hash, MERKLE, TIMESTAMP, BITS, int(n))
+            val = hash_to_int(sha256d(h))
+            if val < best_local:
+                best_local, nonce, header = val, int(n), h
+        return f, best_local, nonce, header, perf_ratio
+
+    converged = False
+    for g in range(GENS):
+        with ThreadPoolExecutor(max_workers=FAMS) as ex:
+            results = list(ex.map(eval_family, range(FAMS)))
+        for f, hval, nonce, header, perf_ratio in results:
+            if hval < shared["best_hash"]:
+                shared.update({"best_hash": hval, "best_nonce": nonce, "best_family": f, "best_header": header, "perf_ratio": perf_ratio})
+            # Update FAM_PERF so all families know who did best this round
+            FAM_PERF[f] = hval
+        depth = math.log10(float(shared["best_hash"] + 1))
+        descent_log.append(depth)
+        SURFACE_MAP[b_idx, g] = depth
+
+        base = shared["best_nonce"] or ANCHOR_NONCE
+        for f_idx in range(FAMS):
+            # Families move toward the best nonce but mutate based on swarm performance
+            swarm_influence = 0.5 + 0.5 * (FAM_PERF[f_idx] / (min(FAM_PERF) + 1))
+            mutation = np.random.randint(-2**22, 2**22, AGENTS, dtype=np.int64)
+            pool[f_idx] = (base + (mutation * swarm_influence).astype(np.int64)) % 2**32
+
+        if shared["best_hash"] < TARGET:
+            print(f"✅ Block {b_idx} Validated | Gen {g+1} | Hash=0x{shared['best_hash']:064x}")
+            converged = True
+            break
+
+    chain.append({
+        "index": b_idx,
+        "height": height,
+        "family": shared["best_family"],
+        "pitch": pitch,
+        "boost": shared.get("perf_ratio", 1.0),
+        "hash": f"{shared['best_hash']:064x}",
+        "status": "✅" if converged else "❌"
+    })
+
+# EXECUTE MINING LOOP
+prev_hash = PREV_HASH
+for b in range(BLOCKS):
+    mine(b, prev_hash)
+    prev_hash = sha256d(bytes.fromhex(chain[-1]["hash"]))[::-1].hex()
+
+# REPORT
+print("\n-- MBT Swarm-Memory/Diversity Chain Summary --")
+for blk in chain:
+    print(f"Block {blk['index']}: Height={blk['height']} | Family={blk['family']} | Pitch={blk['pitch']:.3f} | Boost={blk['boost']:.2f} | Hash=0x{blk['hash']} | Status={blk['status']}")
