@@ -1,0 +1,163 @@
+# 📦 Imports & Setup
+import numpy as np
+import hashlib, struct
+import random
+from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
+
+# ⚙️ Parameters
+BLOCKS, FAMS, GENS, AGENTS = 7, 8, 16, 10000
+VERSION, TIMESTAMP, BITS = 0x20000000, 1720329414, 0x17060a63
+ANCHOR_NONCE, START_HEIGHT = 1250000000, 820000
+PREV_HASH = "0000000000000000000113bb83fdc02b6e2be0b729703235add4b9e1f7a4f519"
+TARGET = int("00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
+
+# 🧠 Glyphs & Personalities
+GLYPH_MAP = ["🧠⚡", "🪨💡", "🩸🌊", "🕷️🌊", "🧠🕷️", "🪨🧠", "🧠⚔️", "🕊️🩸"]
+TRUSTED_GLYPH = [random.choice(GLYPH_MAP) for _ in range(FAMS)]
+PERSONALITY_TYPES = ["loyalist", "rebel", "chaotic", "ritualist"]
+AGENT_PERSONALITY = {f: random.choice(PERSONALITY_TYPES) for f in range(FAMS)}
+VALIDATOR_STATES = {f: {"personality": "loyalist", "drift": 0.0} for f in range(FAMS)}
+
+# 💢 Emotional Vectors
+RAGE = np.zeros(FAMS, dtype=np.int32)
+STREAK = np.zeros(FAMS, dtype=np.int32)
+FATIGUE = np.zeros(FAMS, dtype=np.int32)
+AURA = np.zeros(FAMS, dtype=np.float32)
+AURA_MOMENTUM = np.zeros(FAMS, dtype=np.float32)
+POOL = np.full(FAMS, 2**22, dtype=np.int64)
+
+# 🧬 Memory & Drift Tracking
+chain = []
+SEED_VEC = [ANCHOR_NONCE + np.random.randint(-29, 29) for _ in range(FAMS)]
+DRIFT_TIMELINE = {f: {"loyalist": START_HEIGHT, "rebel": None, "chaotic": None} for f in range(FAMS)}
+
+# 💠 Hash Visibility Log
+HASH_HISTORY = []
+
+def log_hash_visibility(gen_index, results, target_hash):
+    print(f"\n— Gen {gen_index+1}: Hash Report —")
+    for f, hval, nonce, boost, pool_size, merkle in results:
+        glyph = TRUSTED_GLYPH[f]
+        margin = target_hash - hval
+        bits = f"{hval:064x}"[:10]
+        HASH_HISTORY.append((gen_index+1, f, glyph, bits, hval, margin))
+        print(f"Family {f} | Glyph: {glyph} | Best Hash: {bits}... | Margin: {margin}")
+
+# 💢 Emotional Sabotage
+def pre_block_entropy_fix():
+    for f in range(FAMS):
+        if AURA[f] > 12.0: AURA[f] *= 0.85
+        STREAK[f] = max(0, STREAK[f] - 2)
+        AURA[f] *= 0.98
+        AURA_MOMENTUM[f] *= 0.95
+
+def war_sabotage(winner):
+    for ff in range(FAMS):
+        if ff != winner:
+            RAGE[ff] += 1
+            FATIGUE[ff] = max(0, FATIGUE[ff] - 1)
+            AURA[ff] = max(AURA[ff] - 0.1, 0)
+        else:
+            RAGE[ff] = 0
+            STREAK[ff] += 1
+            FATIGUE[ff] = max(0, FATIGUE[ff] - 1)
+            AURA[ff] += 0.5
+            AURA_MOMENTUM[ff] += 0.3
+    if STREAK[winner] >= 3 and AURA[winner] < 8.0:
+        for ff in range(FAMS):
+            if ff != winner:
+                AURA[ff] += 0.2
+
+# 🧠 Drift Mutation Logic
+def apply_personality_drift(block_index):
+    glyph = chain[block_index]["glyph"]
+    for f in range(FAMS):
+        drift = 0.0
+        if TRUSTED_GLYPH[f] == glyph: drift += 0.4
+        if AURA[f] > 10.0: drift += 0.3
+        if STREAK[f] >= 5: drift += 0.2
+        VALIDATOR_STATES[f]["drift"] += drift
+        if VALIDATOR_STATES[f]["drift"] > 1.0 and VALIDATOR_STATES[f]["personality"] == "loyalist":
+            VALIDATOR_STATES[f]["personality"] = "rebel"
+            DRIFT_TIMELINE[f]["rebel"] = START_HEIGHT + block_index
+        elif VALIDATOR_STATES[f]["drift"] > 2.0 and VALIDATOR_STATES[f]["personality"] == "rebel":
+            VALIDATOR_STATES[f]["personality"] = "chaotic"
+            DRIFT_TIMELINE[f]["chaotic"] = START_HEIGHT + block_index
+
+# ⚒️ Hashing Utils
+def sha256d(data): return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+def hash_to_int(h): return int.from_bytes(h, "big")
+def build_header(v, p, m, t, b, n):
+    return (struct.pack("<L", v) + bytes.fromhex(p)[::-1] + bytes.fromhex(m)[::-1]
+            + struct.pack("<L", t) + struct.pack("<L", b) + struct.pack("<L", n))
+
+def mood_merkle(f):
+    glyph = TRUSTED_GLYPH[f]
+    mood = f"{glyph}-{RAGE[f]}-{STREAK[f]}-{FATIGUE[f]}"
+    return hashlib.sha256(mood.encode("utf-8").ljust(32, b"\x00")).digest().hex()
+
+# ⚒️ Mining Engine with HashLens
+def mine(b_idx, prev_hash):
+    height = START_HEIGHT + b_idx
+    best_hash, winner = 2**256, None
+    winner_boost, winner_gen, winning_merkle = 1.0, 0, None
+
+    full_gen_hashes = []
+
+    for g in range(GENS):
+        def eval_family(f):
+            boost = 1.0 + 0.1 * STREAK[f] + 0.12 * RAGE[f] - 0.08 * FATIGUE[f] + 0.06 * AURA[f]
+            pool_size = int(np.clip(POOL[f] * boost, 2**20, 2**26))
+            nonces = (SEED_VEC[f] + np.random.randint(-pool_size, pool_size, AGENTS, dtype=np.int64)) % 2**32
+            best, nonce = 2**256, None
+            merkle = mood_merkle(f)
+            for n in nonces:
+                h = build_header(VERSION, prev_hash, merkle, TIMESTAMP, BITS, int(n))
+                val = hash_to_int(sha256d(h))
+                if val < best:
+                    best, nonce = val, int(n)
+            return f, best, nonce, boost, pool_size, merkle
+
+        with ThreadPoolExecutor(max_workers=FAMS) as ex:
+            results = list(ex.map(eval_family, range(FAMS)))
+
+        log_hash_visibility(g, results, TARGET)  # 💠 NEW: print hashes every generation
+        full_gen_hashes.extend(results)
+
+        for f, hval, nonce, boost, pool_size, merkle in results:
+            if hval < best_hash:
+                best_hash, best_nonce, winner = hval, nonce, f
+                winner_boost, winner_gen = boost, g + 1
+                best_pool_size, winning_merkle = pool_size, merkle
+
+        war_sabotage(winner)
+        POOL[winner] = min(POOL[winner] + 2**18, 2**26)
+        for ff in range(FAMS):
+            if ff != winner:
+                POOL[ff] = max(POOL[ff] - 2**15, 2**20)
+        if best_hash < TARGET: break
+
+    chain.append({
+        "index": b_idx, "height": height, "winner": winner, "gen": winner_gen,
+        "boost": round(winner_boost, 2), "aura": round(AURA[winner], 2),
+        "streak": int(STREAK[winner]), "fatigue": int(FATIGUE[winner]),
+        "glyph": TRUSTED_GLYPH[winner], "personality": AGENT_PERSONALITY[winner],
+        "hash": f"{best_hash:064x}", "pool": best_pool_size
+    })
+
+# 🚀 Run Simulation with Hash Visibility
+prev_hash = PREV_HASH
+for b in range(BLOCKS):
+    print(f"\n🧱 Block {b} Mining — Height {START_HEIGHT + b}")
+    pre_block_entropy_fix()
+    mine(b, prev_hash)
+    prev_hash = sha256d(bytes.fromhex(chain[-1]["hash"]))[::-1].hex()
+    apply_personality_drift(b)
+
+# 📜 Validator Chain Summary
+print("\n🧠 Validator Chain Summary")
+for blk in chain:
+    print(f"Block {blk['index']} | Height={blk['height']} | Winner={blk['winner']} | Gen={blk['gen']} | "
+          f"Glyph={blk['glyph']} | State={blk['personality']} | Aura={blk['aura']} | Boost={blk['boost']} | "
+          f"Streak={blk['streak']} | Fatigue={blk['fatigue']} | Pool={blk['pool']} | Hash=0x{blk['hash']}")
