@@ -1,0 +1,118 @@
+import numpy as np
+import hashlib, struct
+from concurrent.futures import ThreadPoolExecutor
+from scipy.ndimage import gaussian_filter, sobel
+
+# === REALISTIC BITCOIN DIFFICULTY (8 zeros) ===
+TARGET = int("00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
+BLOCKS, FAMS, AGENTS, GENS = 7, 8, 1000000, 200
+VERSION, TIMESTAMP, BITS = 0x20000000, 1720329414, 0x17060a63
+PREV_HASH = "0000000000000000000113bb83fdc02b6e2be0b729703235add4b9e1f7a4f519"
+MERKLE = "0318e2035c20d51ea9de9c04e374f7f1ee7c9b3c4ed2d3e133ed7e1425706533"
+ANCHOR_NONCE, START_HEIGHT = 1250000000, 820000
+SEED_VEC = [ANCHOR_NONCE + np.random.randint(-2**9, 2**9) for _ in range(FAMS)]
+
+chain = []
+SURFACE_MAP = np.zeros((BLOCKS, GENS))
+RAGE = np.zeros(FAMS, dtype=np.int32)
+STREAK = np.zeros(FAMS, dtype=np.int32)
+FATIGUE = np.zeros(FAMS, dtype=np.int32)
+POOL = np.full(FAMS, 2**22, dtype=np.int64)
+
+def sha256d(data): return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+def hash_to_int(h): return int.from_bytes(h, 'big')
+def build_header(v, p, m, t, b, n):
+    return (struct.pack("<L", v) + bytes.fromhex(p)[::-1] +
+            bytes.fromhex(m)[::-1] + struct.pack("<L", t) +
+            struct.pack("<L", b) + struct.pack("<L", n))
+
+def compute_pitch(b_idx):
+    if b_idx < 2: return 0.05
+    terrain = gaussian_filter(SURFACE_MAP, sigma=1.2)
+    grad_x = sobel(terrain, axis=0)
+    grad_y = sobel(terrain, axis=1)
+    pitch = np.mean(np.sqrt(grad_x**2 + grad_y**2)[b_idx-2:b_idx])
+    return np.clip(pitch, 0.05, 1.0)
+
+def boost_factor(f, b_idx):
+    # Increase boost for those on a hot streak, those with high rage, and those with little fatigue.
+    base = 1.0 + 0.10 * STREAK[f] + 0.12 * RAGE[f] - 0.08 * FATIGUE[f]
+    if b_idx == 0: base = 1.0
+    return np.clip(base, 0.05, 8.0)
+
+def war_sabotage(f, winner):
+    # Everyone but winner adds to their rage if they lose, and winner resets rage/fatigue
+    for ff in range(FAMS):
+        if ff != winner:
+            RAGE[ff] += 1
+            FATIGUE[ff] = max(0, FATIGUE[ff] - 1)
+        else:
+            RAGE[ff] = 0
+            STREAK[ff] += 1
+            FATIGUE[ff] = max(0, FATIGUE[ff] - 1)
+    # Any family with rage over 6 gets fatigued
+    for ff in range(FAMS):
+        if RAGE[ff] > 6:
+            FATIGUE[ff] += 1
+            RAGE[ff] = 3  # cool off a little after meltdown
+            STREAK[ff] = 0
+
+def mine(b_idx, prev_hash):
+    height = START_HEIGHT + b_idx
+    pitch = compute_pitch(b_idx)
+    best_hash, best_nonce, winner, winner_boost, winner_gen = 2**256, None, None, 1.0, 0
+    best_pool_size = 0
+
+    for g in range(GENS):
+        def eval_family(f):
+            boost = boost_factor(f, b_idx) * pitch
+            pool_size = int(np.clip(POOL[f] * boost, 2**20, 2**26))
+            nonces = (SEED_VEC[f] + np.random.randint(-pool_size, pool_size, AGENTS, dtype=np.int64)) % 2**32
+            best, nonce = 2**256, None
+            for n in nonces:
+                h = build_header(VERSION, prev_hash, MERKLE, TIMESTAMP, BITS, int(n))
+                val = hash_to_int(sha256d(h))
+                if val < best:
+                    best, nonce = val, int(n)
+            return f, best, nonce, boost, pool_size
+
+        with ThreadPoolExecutor(max_workers=FAMS) as ex:
+            results = list(ex.map(eval_family, range(FAMS)))
+        for f, hval, nonce, boost, pool_size in results:
+            if hval < best_hash:
+                best_hash, best_nonce, winner = hval, nonce, f
+                winner_boost = boost
+                winner_gen = g+1
+                best_pool_size = pool_size
+        SURFACE_MAP[b_idx, g] = np.log10(float(best_hash + 1))
+
+        # Adaptation
+        war_sabotage(f, winner)
+        POOL[winner] = min(POOL[winner] + 2**18, 2**26)
+        for ff in range(FAMS):
+            if ff != winner:
+                POOL[ff] = max(POOL[ff] - 2**15, 2**20)
+
+        if best_hash < TARGET:
+            print(f"✅ Block {b_idx} VALIDATED | Gen {winner_gen} | Family {winner} | Hash=0x{best_hash:064x}")
+            break
+
+    status = "✅" if best_hash < TARGET else "❌"
+    chain.append({
+        "index": b_idx, "height": height, "winner": winner, "gen": winner_gen, "pitch": round(pitch, 3),
+        "boost": round(winner_boost, 2), "streak": int(STREAK[winner]), "fatigue": int(FATIGUE[winner]),
+        "hash": f"{best_hash:064x}", "status": status, "pool": best_pool_size
+    })
+
+# ==== MINING LOOP ====
+prev_hash = PREV_HASH
+for b in range(BLOCKS):
+    mine(b, prev_hash)
+    prev_hash = sha256d(bytes.fromhex(chain[-1]["hash"]))[::-1].hex()
+
+# ==== REPORT ====
+print("\n-- MBT War Swarm Chain Summary --")
+for blk in chain:
+    print(f"Block {blk['index']}: Height={blk['height']} | Winner={blk['winner']} | Gen={blk['gen']} | "
+          f"Pitch={blk['pitch']} | Boost={blk['boost']} | Streak={blk['streak']} | Fatigue={blk['fatigue']} | "
+          f"Pool={blk['pool']} | Hash=0x{blk['hash']} | Status={blk['status']}")
