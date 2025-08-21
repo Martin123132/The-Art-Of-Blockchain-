@@ -1,0 +1,206 @@
+import numpy as np
+import hashlib
+import struct
+import time
+import matplotlib.pyplot as plt
+import math
+from scipy.signal import find_peaks
+from scipy.optimize import curve_fit, root_scalar
+
+# --- Global Configuration ---
+VERSION = 0x20000000
+START_PREV_HASH = '000000000000000000b4f68d4c750e6aab2c184ed9f020c8b7ce260185383c95'
+BITS = 0xfff00000  # Synthetic easy difficulty
+BLOCK_COUNT = 5    # Number of chained blocks to mine
+
+# --- Difficulty Conversion ---
+def bits_to_target(bits):
+    exponent = bits >> 24
+    mantissa = bits & 0xffffff
+    return mantissa * (1 << (8 * (exponent - 3)))
+
+TARGET = bits_to_target(BITS)
+
+# --- Coinbase Generator ---
+def generate_coinbase_tx(block_height):
+    input_script = b'\x03\x04\xff\xff' + struct.pack('<L', block_height)
+    output_script = b'\x51'  # OP_TRUE placeholder
+    tx = (
+        struct.pack('<L', 1) +
+        b'\x01' + b'\x00'*32 + b'\xff\xff\xff\xff' + bytes([len(input_script)]) + input_script +
+        struct.pack('<L', 0xffffffff) +
+        b'\x01' + struct.pack('<Q', 50 * 10**8) + bytes([len(output_script)]) + output_script +
+        struct.pack('<L', 0)
+    )
+    return tx
+
+# --- Merkle Root Generator ---
+def double_sha256(data):
+    return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+
+def coinbase_merkle(block_height):
+    tx = generate_coinbase_tx(block_height)
+    tx_hash = double_sha256(tx)
+    return tx_hash[::-1].hex()
+
+# --- Block Header Builder ---
+def build_header(version, prev_hash, merkle_root, timestamp, bits, nonce):
+    return (
+        struct.pack('<L', version) +
+        bytes.fromhex(prev_hash)[::-1] +
+        bytes.fromhex(merkle_root)[::-1] +
+        struct.pack('<L', timestamp) +
+        struct.pack('<L', bits) +
+        struct.pack('<L', nonce)
+    )
+
+# --- MBT Echo Oracle for Curvature Forecasting ---
+def mbt_echo_raw(s, modes=60):
+    return sum(np.exp(-s * np.log(n)) * np.cos(n * np.pi / 2) for n in range(1, modes + 1))
+
+def hybrid(x, a, b, c): return a * x**b + c
+riemann = np.array([14.1347, 21.0220, 25.0108, 30.4248])
+y_scan = np.linspace(-62, 62, 8000)
+s_scan = 0.5 + 1j * y_scan
+Z_raw = np.abs(mbt_echo_raw(s_scan))
+min_idx, _ = find_peaks(-Z_raw, prominence=0.01, distance=40)
+raw_dips = y_scan[min_idx]
+offset = riemann[0] + raw_dips[0]
+aligned = -raw_dips + offset
+x_fit = np.clip(aligned[:len(riemann)], 1e-3, None)
+popt, _ = curve_fit(hybrid, x_fit, riemann, p0=[1, 1, 0], maxfev=10000)
+
+def invert_hybrid(y, a, b, c):
+    def f(x): return a * x**b + c - y
+    try:
+        sol = root_scalar(f, bracket=[1e-4, 200], method='bisect')
+        return sol.root if sol.converged else np.mean(x_fit)
+    except:
+        return np.mean(x_fit)
+
+def forecast_dips(gen, modes=60):
+    y = np.linspace(1, 60, 800)
+    s = 0.5 + 1j * y
+    curved = [invert_hybrid(im.imag, *popt) for im in s]
+    curved_s = 0.5 + 1j * np.array(curved)
+    total = sum(np.exp(-curved_s * np.log(n)) * np.cos(n * np.pi / 2 + n * gen * np.pi / 32) for n in range(1, modes + 1))
+    Z = np.abs(total)
+    dips, _ = find_peaks(-Z, prominence=0.01, distance=40)
+    return np.mean(Z[dips]), Z[dips]
+
+
+
+
+
+GENERATIONS = 12
+AGENTS = 4000
+OVERGEN = AGENTS * 2
+rng = np.random.default_rng()
+
+prev_hash = START_PREV_HASH
+chain_headers = []
+block_log = []
+
+print(f"🚀 Block Trial XV — Multi-Block Chain Genesis")
+print(f"Target = 0x{TARGET:x}\n")
+
+for blk in range(1, BLOCK_COUNT + 1):
+    print(f"\n🔧 Mining Block #{blk} — Prev = {prev_hash}")
+    merkle_root = coinbase_merkle(blk)
+    parent_nonces = rng.integers(0, 2**32, AGENTS, dtype=np.uint64)
+    lineage_score = np.ones(AGENTS)
+    collapse_counter = 0
+    best_hash = 2**256
+    best_nonce = None
+    best_hashes, avg_hashes = [], []
+
+    for gen in range(GENERATIONS):
+        echo_amp, dip_vector = forecast_dips(gen)
+        dip_density = np.std(dip_vector)
+        timestamp = int(time.time()) + int(2 * math.sin(gen / 2) + echo_amp / 4)
+
+        candidates = rng.integers(0, 2**32, OVERGEN, dtype=np.uint64)
+        hashes = np.zeros(OVERGEN, dtype=object)
+
+        for i, nonce in enumerate(candidates):
+            header = build_header(VERSION, prev_hash, merkle_root, timestamp, BITS, int(nonce))
+            h = int.from_bytes(sha256d(header)[::-1], 'big')
+            hashes[i] = h
+
+        best_idx = np.argmin(hashes)
+        hash_val = hashes[best_idx]
+        avg_val = np.mean([int(h) for h in hashes])
+
+        best_hashes.append(hash_val)
+        avg_hashes.append(avg_val)
+
+        print(f"⭐ Gen {gen+1}: Hash=0x{hash_val:x}")
+
+        if hash_val < best_hash:
+            best_hash = hash_val
+            best_nonce = int(candidates[best_idx])
+            collapse_counter = 0
+        else:
+            collapse_counter += 1
+
+        if hash_val < TARGET:
+            print(f"✅ BLOCK FOUND at Gen {gen+1}")
+            break
+
+        elite_idx = np.argsort(hashes)[:AGENTS]
+        elite_pool = candidates[elite_idx].astype(np.int64)
+        zone_split = elite_pool.shape[0] // 3
+        lineage_score = np.clip(lineage_score + rng.normal(0.3, 0.1, AGENTS), 0.5, 4.0)
+
+        amp_base = echo_amp / 12
+        entropy_boost = 1.5 if collapse_counter >= 3 else 1.0
+        density_mod = np.clip(dip_density, 1.2, 4.0)
+
+        zone1, zone2, zone3 = elite_pool[:zone_split], elite_pool[zone_split:2*zone_split], elite_pool[2*zone_split:]
+        drift1 = amp_base * density_mod * entropy_boost * lineage_score[:zone_split] * rng.integers(-2**31, 2**31, zone_split, dtype=np.int64)
+        drift2 = amp_base * entropy_boost * rng.integers(-2**31, 2**31, zone_split, dtype=np.int64)
+        drift3 = amp_base * entropy_boost * rng.integers(-2**31, 2**31, zone_split, dtype=np.int64)
+
+        mutated1 = (zone1 + drift1) % (2**32)
+        mutated2 = (zone2 + drift2) % (2**32)
+        mutated3 = (zone3 + drift3) % (2**32)
+
+        parent_nonces = np.concatenate([mutated1, mutated2, mutated3]).astype(np.uint64)
+
+    # Final block header and hash
+    timestamp = int(time.time())
+    header_final = build_header(VERSION, prev_hash, merkle_root, timestamp, BITS, best_nonce)
+    header_hash = sha256d(header_final)[::-1].hex()
+    header_hex = header_final.hex()
+
+    print(f"\n📦 Block #{blk} Mined!")
+    print(f"Best nonce  : {best_nonce}")
+    print(f"Block hash  : {header_hash}")
+    print(f"Header hex  : {header_hex}\n")
+
+    chain_headers.append(header_hex)
+    block_log.append({
+        'height': blk,
+        'hash': header_hash,
+        'nonce': best_nonce,
+        'timestamp': timestamp
+    })
+
+    prev_hash = header_hash
+
+# --- Block Log Summary ---
+print("\n🔗 MBT Block Chain Summary:")
+for blk in block_log:
+    print(f"Block {blk['height']} | Hash: {blk['hash']} | Nonce: {blk['nonce']} | Time: {blk['timestamp']}")
+
+# --- Plot Difficulty Descent ---
+plt.figure(figsize=(14, 4))
+for i, log in enumerate(block_log):
+    plt.plot(i+1, math.log10(int(log['hash'], 16)), 'o', label=f"Block {i+1}")
+plt.axhline(math.log10(TARGET), color='red', linestyle='--', label="Target")
+plt.title("MBT Multi-Block Hash Convergence")
+plt.xlabel("Block Height")
+plt.ylabel("log₁₀(Hash Value)")
+plt.legend()
+plt.tight_layout()
+plt.show()
