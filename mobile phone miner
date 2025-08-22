@@ -1,0 +1,46 @@
+import ui
+import hashlib
+import random
+
+BLOCKS, FAMS, AGENTS, GENS = 1, 7, 5000, 17   # Tuned for mobile speed
+TARGET = int("0000000fffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
+
+class MinerApp(ui.View):
+    def __init__(self):
+        self.background_color = 'black'
+        self.mbt_coins = 0
+        self.console = ui.Label(frame=(10,40,360,300), text_color='white', font=('Menlo',13), number_of_lines=0)
+        self.console.text = "MBT Swarm Mini-Miner\n"
+        self.add_subview(self.console)
+        self.btn = ui.Button(title="Start MBT Swarm Mining", frame=(80,340,220,40), bg_color='#2222ff', tint_color='white', font=('Menlo',15))
+        self.btn.action = self.mine
+        self.add_subview(self.btn)
+        self.coinlabel = ui.Label(frame=(10,400,380,30), font=('Menlo',18), text_color='yellow', alignment=ui.ALIGN_LEFT)
+        self.coinlabel.text = "MBT Coins: 0"
+        self.add_subview(self.coinlabel)
+       
+    def mine(self, sender):
+        blocks_solved = 0
+        for b in range(BLOCKS):
+            winner, w_nonce, w_hash = -1, 0, 2**256
+            block_out = ""
+            for g in range(1,GENS+1):
+                for f in range(FAMS):
+                    for _ in range(AGENTS):
+                        nonce = random.randint(0, 2**32-1)
+                        data = f"{b}-{f}-{g}-{nonce}".encode()
+                        h = int.from_bytes(hashlib.sha256(hashlib.sha256(data).digest()).digest(), 'big')
+                        if h < w_hash:
+                            w_hash = h
+                            winner, w_nonce = f, nonce
+                block_out += f"Gen {g}: Lowest Hash = 0x{w_hash:064x}\n"
+                if w_hash < TARGET:
+                    self.mbt_coins += 10  # Reward per block!
+                    blocks_solved += 1
+                    block_out += f"\nBlock {b} Winner: Family {winner}, Nonce {w_nonce}\n\n"
+                    break
+            self.console.text = block_out
+            self.coinlabel.text = f"MBT Coins: {self.mbt_coins}"
+           
+view = MinerApp()
+view.present('sheet')
