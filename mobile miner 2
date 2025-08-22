@@ -1,0 +1,71 @@
+import numpy as np
+import hashlib, struct
+import random
+import ui
+
+# ==== REAL BITCOIN-LIKE BLOCK VARIABLES ====
+VERSION = 0x20000000
+PREV_HASH = "0000000000000000000113bb83fdc02b6e2be0b729703235add4b9e1f7a4f519"
+MERKLE = "0318e2035c20d51ea9de9c04e374f7f1ee7c9b3c4ed2d3e133ed7e1425706533"
+TIMESTAMP = 1720329414
+BITS = 0x17060a63
+TARGET = int("00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)  # 8 zeros, can lower for demo
+
+BLOCKS, FAMS, AGENTS, GENS = 16, 10, 1000, 10 # Smaller numbers for mobile, tune up/down if you want
+
+ANCHOR_NONCE = 1250000000
+START_HEIGHT = 820000
+SEED_VEC = [ANCHOR_NONCE + random.randint(-2**9, 2**9) for _ in range(FAMS)]
+
+def sha256d(data):
+    return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+def hash_to_int(h): return int.from_bytes(h, 'big')
+def build_header(v, p, m, t, b, n):
+    return (struct.pack("<L", v) + bytes.fromhex(p)[::-1] +
+            bytes.fromhex(m)[::-1] + struct.pack("<L", t) +
+            struct.pack("<L", b) + struct.pack("<L", n))
+
+# ==== UI SETUP ====
+class MinerView(ui.View):
+    def __init__(self):
+        self.background_color = 'black'
+        self.console = ui.TextView(frame=(0, 40, self.width, self.height-90), flex='WH', editable=False, font=('Menlo', 12), text_color='white', background_color='black')
+        self.add_subview(self.console)
+        self.btn = ui.Button(title='Start MBT Swarm Mining', frame=(20, self.height-50, 300, 36), action=self.start_mining, flex='TW')
+        self.btn.tint_color = '#0099ff'
+        self.add_subview(self.btn)
+        self.results = ""
+        self.coins = 0
+
+    def log(self, msg, color='white'):
+        self.console.text += msg + '\n'
+       
+    def start_mining(self, sender):
+        self.console.text = ""
+        prev_hash = PREV_HASH
+        chain = []
+        for b in range(BLOCKS):
+            self.log(f'\nBlock {b}:')
+            winner, lowest_hash, best_nonce = None, 2**256, None
+            for g in range(GENS):
+                for f in range(FAMS):
+                    # Each family gets their seed
+                    pool_size = 2**18  # can increase if you want
+                    nonces = (SEED_VEC[f] + np.random.randint(-pool_size, pool_size, AGENTS, dtype=np.int64)) % 2**32
+                    for n in nonces:
+                        h = build_header(VERSION, prev_hash, MERKLE, TIMESTAMP, BITS, int(n))
+                        val = hash_to_int(sha256d(h))
+                        if val < lowest_hash:
+                            lowest_hash, winner, best_nonce = val, f, int(n)
+                self.log(f'  Gen {g+1}: Lowest Hash = 0x{lowest_hash:064x}')
+            # End block
+            if lowest_hash < TARGET:
+                self.log(f'\n✅ Block {b} SOLVED! Family {winner}, Nonce {best_nonce}, Hash=0x{lowest_hash:064x}', color='green')
+                self.coins += 1
+            else:
+                self.log(f'\n❌ Block {b} not solved. Best Hash=0x{lowest_hash:064x}', color='red')
+            prev_hash = sha256d(bytes.fromhex(f'{lowest_hash:064x}'))[::-1].hex()
+        self.log(f"\nMBT Coins: {self.coins}", color='yellow')
+
+v = MinerView()
+v.present('fullscreen')
