@@ -1,0 +1,177 @@
+import numpy as np
+import hashlib, struct
+import matplotlib.pyplot as plt
+from concurrent.futures import ThreadPoolExecutor
+
+# ======== MAINNET BITCOIN SETTINGS =========
+PREV_HASH = "0000000000000000000113bb83fdc02b6e2be0b729703235add4b9e1f7a4f519"
+MERKLE = "0318e2035c20d51ea9de9c04e374f7f1ee7c9b3c4ed2d3e133ed7e1425706533"
+TIMESTAMP = 1720329414
+VERSION = 0x20000000
+BITS = int("17060a63", 16)  # July 2025, actual Bitcoin mainnet difficulty
+
+def bits_to_target(bits):
+    exponent = bits >> 24
+    mantissa = bits & 0xffffff
+    return mantissa * (1 << (8 * (exponent - 3)))
+TARGET = bits_to_target(BITS)
+TARGET_LOG = np.log10(float(TARGET))
+
+# ======== SIMULATION PARAMETERS ========
+BLOCKS, FAMS, AGENTS, GENS = 4, 8, 10000, 15
+
+ANCHOR_NONCE = 1182367717
+SEED_VEC = [ANCHOR_NONCE + np.random.randint(-2**9, 2**9) for _ in range(FAMS)]
+
+def sha256d(d): return hashlib.sha256(hashlib.sha256(d).digest()).digest()
+def hash_to_int(h): return int.from_bytes(h, 'big')
+def build_block_header(v, p, m, t, b, n):
+    return (
+        struct.pack("<L", v) +
+        bytes.fromhex(p)[::-1] +
+        bytes.fromhex(m)[::-1] +
+        struct.pack("<L", t) +
+        struct.pack("<L", b) +
+        struct.pack("<L", n)
+    )
+
+chain = []
+SPARTAN_HALL = []
+
+def mine(b_idx, prev_hash):
+    descent_log = []
+    drift_center = ANCHOR_NONCE
+    shared = {"best_hash":2**256, "best_nonce":None, "best_family":None, "best_header":None}
+    ts = TIMESTAMP
+    merkle = MERKLE
+
+    # === Pools ===
+    pool = [(vec + np.random.randint(-2**22, 2**22, AGENTS, dtype=np.int64)) % 2**32 for vec in SEED_VEC]
+    undead_pool = []
+    family_champions = [{"nonce": SEED_VEC[f], "hash": 2**256, "header": None} for f in range(FAMS)]
+
+    sacrificed = 0
+
+    def eval_family(f):
+        best_local, nonce, header = 2**256, None, None
+        # Test all living agents
+        for n in pool[f]:
+            h = build_block_header(VERSION, prev_hash, merkle, ts, BITS, int(n))
+            hval = hash_to_int(sha256d(h))
+            if hval < best_local:
+                best_local, nonce, header = hval, int(n), h
+        return f, best_local, nonce, header
+
+    def eval_undead():
+        if len(undead_pool) == 0: return "Undead", 2**256, None, None
+        best_local, nonce, header = 2**256, None, None
+        for n in undead_pool:
+            h = build_block_header(VERSION, prev_hash, merkle, ts, BITS, int(n))
+            hval = hash_to_int(sha256d(h))
+            if hval < best_local:
+                best_local, nonce, header = hval, int(n), h
+        return "Undead", best_local, nonce, header
+
+    def eval_champion(f):
+        champ = family_champions[f]
+        h = build_block_header(VERSION, prev_hash, merkle, ts, BITS, int(champ["nonce"]))
+        hval = hash_to_int(sha256d(h))
+        if hval < champ["hash"]:
+            champ["hash"] = hval
+            champ["header"] = h
+        return f, champ["hash"], champ["nonce"], champ["header"]
+
+    for g in range(GENS):
+        # Run all evaluations: living, undead, champion
+        with ThreadPoolExecutor(max_workers=FAMS+2) as ex:
+            results = list(ex.map(eval_family, range(FAMS)))
+        # Undead and champions
+        undead_result = eval_undead()
+        champion_results = [eval_champion(f) for f in range(FAMS)]
+        all_results = results + [undead_result] + champion_results
+
+        for res in all_results:
+            f, hval, nonce, header = res
+            if hval < shared["best_hash"]:
+                shared.update({
+                    "best_hash": hval,
+                    "best_nonce": nonce,
+                    "best_family": f,
+                    "best_header": header
+                })
+        # Spartan Hall of Fame
+        SPARTAN_HALL.append((shared["best_hash"], shared["best_nonce"]))
+        SPARTAN_HALL.sort()
+        SPARTAN_HALL[:] = SPARTAN_HALL[:5]
+
+        # Logging
+        depth = np.log10(float(shared["best_hash"] + 1))
+        descent_log.append(depth)
+
+        # Death & Resurrection!
+        dead = []
+        for f in range(FAMS):
+            worst = np.argpartition(pool[f], -int(0.05*AGENTS))[-int(0.05*AGENTS):]
+            dead.extend(pool[f][worst])
+            sacrificed += len(worst)
+            # Survivors mutate (around best nonce, hall-of-fame, and champion)
+            if np.random.rand() < 0.20 and len(SPARTAN_HALL) > 1:
+                legend_hash, legend_nonce = SPARTAN_HALL[np.random.randint(len(SPARTAN_HALL))]
+                center = legend_nonce
+            elif np.random.rand() < 0.15:
+                center = family_champions[f]["nonce"]
+            else:
+                center = shared["best_nonce"]
+            mutation = np.random.randint(-2**22, 2**22, AGENTS, dtype=np.int64)
+            pool[f] = (center + mutation) % 2**32
+        # Undead rise!
+        if len(dead) > 0:
+            undead_pool.extend(dead)
+            undead_pool = undead_pool[-20000:]  # cap memory for speed
+
+        # Champions mutate—never die!
+        for f in range(FAMS):
+            champ = family_champions[f]
+            if champ["hash"] > shared["best_hash"]:
+                champ["nonce"] = (shared["best_nonce"] + np.random.randint(-2**16, 2**16)) % 2**32
+            else:
+                champ["nonce"] = (champ["nonce"] + np.random.randint(-2**18, 2**18)) % 2**32
+
+        if shared["best_hash"] < TARGET:
+            print(f"🏆 Block {b_idx} Converged | Gen {g+1} | Hash=0x{shared['best_hash']:064x}")
+            break
+
+    chain.append({
+        "index": b_idx,
+        "hash": f"{shared['best_hash']:064x}",
+        "nonce": shared["best_nonce"],
+        "family": shared["best_family"] if shared["best_family"] != "Undead" else "Undead",
+        "header": shared["best_header"].hex() if shared["best_header"] else None,
+        "timestamp": ts,
+        "log_trace": descent_log
+    })
+
+# ---- RUN ----
+prev_hash = PREV_HASH
+for b in range(BLOCKS):
+    mine(b, prev_hash)
+    prev_hash = sha256d(bytes.fromhex(chain[-1]["header"]))[::-1].hex() if chain[-1]["header"] else prev_hash
+
+# ---- VISUALIZE ----
+plt.figure(figsize=(16,3))
+for blk in chain:
+    label = f"Block {blk['index']}"
+    plt.plot(blk["log_trace"], marker='o', label=label)
+plt.axhline(TARGET_LOG, color='red', linestyle='--', label="Validation Threshold")
+plt.title("MBT Spartan Mining (Champions & Army of the Dead, Mainnet Difficulty)")
+plt.xlabel("Generation")
+plt.ylabel("log₁₀(Hash Value)")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+print("\n-- Chain Summary --")
+for blk in chain:
+    status = "✅" if int(blk["hash"], 16) < TARGET else "❌"
+    fam = blk.get("family", "-")
+    print(f"Block {blk['index']}: Hash=0x{blk['hash']} | Nonce={blk['nonce']} | Family={fam} | Status={status}")
