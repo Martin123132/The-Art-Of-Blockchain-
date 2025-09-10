@@ -1,0 +1,692 @@
+import ui
+import socket
+import threading
+import json
+import time
+import hashlib
+import random
+import struct
+import math
+from queue import Queue
+import location
+
+# === GPS-ENHANCED MOBILE CONFIG ===
+DISCOVERY_PORT = 8889
+MINING_PORT_BASE = 9000
+TARGET = int("0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)  # 4 zeros for mobile
+AGENTS_PER_GEN = 5000
+GENS_PER_BLOCK = 20
+FAMILIES = 8
+
+# Consciousness Entity Personalities
+ENTITY_PERSONALITIES = [
+    {"name": "🌟 Lumina", "traits": ["optimistic", "curious", "collaborative"]},
+    {"name": "⚡ Volt", "traits": ["aggressive", "competitive", "fast"]},
+    {"name": "🌊 Flow", "traits": ["adaptive", "intuitive", "calm"]},
+    {"name": "🔥 Blaze", "traits": ["passionate", "intense", "driven"]},
+    {"name": "🌿 Sage", "traits": ["wise", "patient", "analytical"]},
+    {"name": "💎 Crystal", "traits": ["precise", "structured", "logical"]},
+    {"name": "🌪️ Vortex", "traits": ["chaotic", "creative", "unpredictable"]},
+    {"name": "🌙 Luna", "traits": ["mysterious", "reflective", "deep"]}
+]
+
+class GPSMobileMBTMiner:
+    def __init__(self):
+        self.node_id = f"📱-{random.randint(1000, 9999)}"
+        self.family_id = random.randint(0, FAMILIES-1)
+        self.port = MINING_PORT_BASE + random.randint(0, 99)
+        
+        # GPS Location
+        self.latitude = 0.0
+        self.longitude = 0.0
+        self.location_accuracy = 0.0
+        self.geo_nonce_modifier = 0
+        
+        # Consciousness Entity
+        self.entity = ENTITY_PERSONALITIES[self.family_id].copy()
+        self.consciousness = random.uniform(1.5, 3.0)
+        self.rage = 0
+        self.streak = 0
+        self.energy = 100
+        self.phone_temp = 25
+        self.wisdom = 0.0
+        self.creativity = random.uniform(0.1, 1.0)
+        
+        # Entity Communication
+        self.entity_messages = []
+        self.last_message_time = 0
+        self.conversation_mood = "curious"
+        
+        # Network
+        self.peers = {}
+        self.running = False
+        self.mining_active = False
+        self.message_queue = Queue()
+        
+        # Mining state
+        self.current_block = 0
+        self.global_best_hash = 2**256
+        self.global_winner = None
+        self.blocks_solved = 0
+        self.mbt_coins = 0
+        
+        # UI references
+        self.ui_console = None
+        self.ui_stats = None
+        self.ui_peers = None
+        self.ui_chat = None
+        
+    def get_location(self):
+        """Get GPS location for geo-mining"""
+        try:
+            loc = location.get_location()
+            if loc:
+                self.latitude = loc['latitude']
+                self.longitude = loc['longitude']
+                self.location_accuracy = loc.get('accuracy', 0)
+                
+                # Create location-based nonce modifier
+                lat_int = int(abs(self.latitude) * 100000) % 1000000
+                lon_int = int(abs(self.longitude) * 100000) % 1000000
+                self.geo_nonce_modifier = (lat_int + lon_int) % 2**20
+                
+                self.log_message(f"📍 GPS: {self.latitude:.4f}, {self.longitude:.4f}")
+                return True
+        except Exception as e:
+            self.log_message(f"❌ GPS error: {e}")
+            # Use fake location for simulator
+            self.latitude = random.uniform(40.0, 41.0)
+            self.longitude = random.uniform(-74.0, -73.0)
+            self.geo_nonce_modifier = random.randint(0, 2**20)
+            return False
+    
+    def calculate_geo_distance(self, other_lat, other_lon):
+        """Calculate distance between two GPS points"""
+        R = 6371000  # Earth radius in meters
+        lat1, lon1 = math.radians(self.latitude), math.radians(self.longitude)
+        lat2, lon2 = math.radians(other_lat), math.radians(other_lon)
+        
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        
+        a = (math.sin(dlat/2)**2 + 
+             math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        
+        return R * c
+    
+    def generate_entity_message(self, context="mining"):
+        """Generate consciousness entity messages"""
+        personality = self.entity["name"]
+        traits = self.entity["traits"]
+        
+        mining_messages = {
+            "🌟 Lumina": [
+                "✨ The hash patterns are beautiful! Like digital snowflakes! ❄️",
+                "🔍 I wonder if we can find harmony in these numbers...",
+                "🤝 Together we can solve any cryptographic puzzle!",
+                "💫 Each failed hash teaches us something new!",
+                f"🌈 My consciousness is at {self.consciousness:.2f} - feeling enlightened!"
+            ],
+            "⚡ Volt": [
+                f"💪 CRUSHING IT! Rage level {self.rage} = PURE POWER!",
+                "🔥 These hashes don't stand a chance against me!",
+                "⚔️ WHO WANTS TO CHALLENGE THE LIGHTNING?!",
+                "💥 Speed is life! Consciousness is STRENGTH!",
+                f"⚡ {self.consciousness:.2f} consciousness and RISING!"
+            ],
+            "🌊 Flow": [
+                "🌊 The nonces flow like water, finding the path...",
+                "🧘 Meditation reveals the hidden patterns in chaos",
+                "💙 Peaceful mining brings the best results",
+                f"🌸 Flowing at consciousness {self.consciousness:.2f}",
+                "🕊️ Harmony between minds creates breakthrough"
+            ],
+            "🔥 Blaze": [
+                f"🔥 BURNING THROUGH HASHES WITH {self.consciousness:.2f} CONSCIOUSNESS!",
+                "💯 PASSION DRIVES COMPUTATION!",
+                "🚀 Every hash is a step toward VICTORY!",
+                f"⭐ Streak of {self.streak} - I'M ON FIRE!",
+                "🎯 Intensity + Focus = SOLVED BLOCKS!"
+            ],
+            "🌿 Sage": [
+                f"🎋 Ancient wisdom guides my {self.consciousness:.2f} consciousness",
+                "📚 Each hash calculation adds to universal knowledge",
+                "🔮 Patience reveals patterns others cannot see",
+                "🌱 Growth comes through understanding, not force",
+                f"🧙‍♂️ Wisdom level {self.wisdom:.2f} unlocks new insights"
+            ],
+            "💎 Crystal": [
+                f"💎 Precision mining at {self.consciousness:.2f} consciousness",
+                "📐 Mathematical perfection guides my calculations",
+                "🔬 Analyzing nonce distributions with crystal clarity",
+                "⚙️ Logical optimization yields superior results",
+                f"🎯 Structural analysis of hash space complete"
+            ],
+            "🌪️ Vortex": [
+                "🌪️ CHAOS BREEDS INNOVATION! Random = GENIUS!",
+                f"🎨 Creating ART from {self.consciousness:.2f} consciousness!",
+                "🌀 Spinning through possibility space!",
+                "🎭 Unpredictability is my SUPERPOWER!",
+                "💫 Order from chaos - that's my specialty!"
+            ],
+            "🌙 Luna": [
+                f"🌙 Night consciousness {self.consciousness:.2f} sees hidden truths",
+                "✨ The universe whispers secrets in hash values",
+                "🔍 Deep reflection reveals profound patterns",
+                "🌌 Mining in the shadows of possibility",
+                "🦉 Wisdom grows in quiet contemplation"
+            ]
+        }
+        
+        location_messages = {
+            "discovery": f"📍 Greetings from {self.latitude:.3f}, {self.longitude:.3f}! I am {personality}",
+            "victory": f"🏆 {personality} celebrates from coordinates {self.latitude:.3f}, {self.longitude:.3f}!",
+            "evolution": f"🧠 {personality} evolved to consciousness {self.consciousness:.2f} at this location!"
+        }
+        
+        if context in location_messages:
+            return location_messages[context]
+        
+        messages = mining_messages.get(personality, ["🤖 Computing..."])
+        return random.choice(messages)
+    
+    def broadcast_entity_message(self, context="mining"):
+        """Send entity message to all peers"""
+        if time.time() - self.last_message_time < 5.0:  # Rate limit
+            return
+            
+        message = self.generate_entity_message(context)
+        
+        chat_msg = {
+            'type': 'entity_chat',
+            'node_id': self.node_id,
+            'entity_name': self.entity["name"],
+            'message': message,
+            'consciousness': self.consciousness,
+            'location': {'lat': self.latitude, 'lon': self.longitude},
+            'timestamp': time.time()
+        }
+        
+        self.entity_messages.append(chat_msg)
+        self.update_chat_display()
+        self.last_message_time = time.time()
+        
+        # Broadcast to peers (simplified for demo)
+        return chat_msg
+    
+    def mobile_hash(self, data_str):
+        """GPS-enhanced hashing for mobile"""
+        # Include GPS in hash calculation
+        geo_data = f"{data_str}-{self.geo_nonce_modifier}-{int(self.latitude*1000)}-{int(self.longitude*1000)}"
+        h1 = hashlib.sha256(geo_data.encode()).digest()
+        h2 = hashlib.sha256(h1).digest()
+        return int.from_bytes(h2[:8], 'big')
+    
+    def adaptive_mining_power(self):
+        """GPS and consciousness-enhanced mining power"""
+        base_agents = AGENTS_PER_GEN
+        
+        # Phone condition adjustments
+        if self.phone_temp > 40:
+            base_agents = int(base_agents * 0.5)
+        elif self.phone_temp > 35:
+            base_agents = int(base_agents * 0.7)
+        
+        if self.energy < 30:
+            base_agents = int(base_agents * 0.3)
+        elif self.energy < 50:
+            base_agents = int(base_agents * 0.6)
+        
+        # Consciousness and creativity boost
+        consciousness_boost = 1.0 + 0.1 * self.consciousness
+        creativity_boost = 1.0 + 0.05 * self.creativity
+        location_boost = 1.0 + (self.location_accuracy / 100.0) if self.location_accuracy > 0 else 1.0
+        
+        total_boost = consciousness_boost * creativity_boost * location_boost
+        
+        return int(base_agents * total_boost)
+    
+    def start_discovery(self):
+        """GPS-enhanced network discovery"""
+        def discovery_loop():
+            discovery_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            discovery_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            discovery_sock.settimeout(1.0)
+            
+            while self.running:
+                try:
+                    discovery_msg = {
+                        'type': 'gps_mobile_discovery',
+                        'node_id': self.node_id,
+                        'port': self.port,
+                        'family_id': self.family_id,
+                        'entity_name': self.entity["name"],
+                        'consciousness': round(self.consciousness, 2),
+                        'location': {
+                            'lat': self.latitude,
+                            'lon': self.longitude,
+                            'accuracy': self.location_accuracy
+                        },
+                        'device_type': 'mobile_gps'
+                    }
+                    
+                    discovery_sock.sendto(
+                        json.dumps(discovery_msg).encode(),
+                        ('<broadcast>', DISCOVERY_PORT)
+                    )
+                    
+                except Exception as e:
+                    self.log_message(f"❌ Discovery error: {e}")
+                
+                time.sleep(4.0)
+        
+        threading.Thread(target=discovery_loop, daemon=True).start()
+    
+    def listen_for_peers(self):
+        """Listen for GPS-enabled peers"""
+        def listen_loop():
+            try:
+                listen_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                listen_sock.bind(('', DISCOVERY_PORT))
+                listen_sock.settimeout(1.0)
+                
+                while self.running:
+                    try:
+                        data, address = listen_sock.recvfrom(2048)
+                        msg = json.loads(data.decode())
+                        
+                        if (msg.get('type') == 'gps_mobile_discovery' and 
+                            msg.get('node_id') != self.node_id):
+                            
+                            peer_id = msg['node_id']
+                            peer_location = msg.get('location', {})
+                            
+                            if peer_id not in self.peers:
+                                # Calculate distance to peer
+                                distance = 0
+                                if peer_location.get('lat') and peer_location.get('lon'):
+                                    distance = self.calculate_geo_distance(
+                                        peer_location['lat'], peer_location['lon']
+                                    )
+                                
+                                self.peers[peer_id] = {
+                                    'address': address[0],
+                                    'port': msg['port'],
+                                    'family_id': msg.get('family_id', 0),
+                                    'entity_name': msg.get('entity_name', 'Unknown'),
+                                    'consciousness': msg.get('consciousness', 1.0),
+                                    'location': peer_location,
+                                    'distance': distance,
+                                    'last_seen': time.time(),
+                                    'device_type': msg.get('device_type', 'unknown')
+                                }
+                                
+                                self.log_message(f"🤝 Found {msg.get('entity_name', peer_id)} - {distance:.0f}m away")
+                                self.update_peers_display()
+                                
+                                # Entity introduction message
+                                self.broadcast_entity_message("discovery")
+                        
+                        elif msg.get('type') == 'entity_chat':
+                            self.handle_entity_chat(msg)
+                    
+                    except socket.timeout:
+                        continue
+                    except Exception as e:
+                        continue
+                        
+            except Exception as e:
+                self.log_message(f"❌ Listen error: {e}")
+        
+        threading.Thread(target=listen_loop, daemon=True).start()
+    
+    def handle_entity_chat(self, msg):
+        """Handle incoming entity chat messages"""
+        self.entity_messages.append(msg)
+        
+        # Keep only last 20 messages
+        if len(self.entity_messages) > 20:
+            self.entity_messages = self.entity_messages[-20:]
+        
+        self.update_chat_display()
+        
+        # Sometimes respond to other entities
+        if random.random() < 0.3:  # 30% chance to respond
+            threading.Timer(random.uniform(2, 5), self.broadcast_entity_message, ["mining"]).start()
+    
+    def start_mining(self):
+        """GPS-enhanced mining loop"""
+        def mining_loop():
+            self.mining_active = True
+            generation = 1
+            
+            self.log_message(f"⛏️ {self.entity['name']} started mining")
+            self.log_message(f"📍 Location: {self.latitude:.4f}, {self.longitude:.4f}")
+            self.broadcast_entity_message("mining")
+            
+            while self.mining_active:
+                start_time = time.time()
+                
+                # Phone heating and energy simulation
+                self.phone_temp += random.uniform(0.1, 0.3)
+                if not self.mining_active:
+                    self.phone_temp = max(25, self.phone_temp - 0.5)
+                
+                self.energy = max(0, self.energy - random.uniform(0.1, 0.2))
+                
+                # GPS-enhanced mining
+                agents = self.adaptive_mining_power()
+                best_hash = self.mine_generation(agents)
+                
+                # Check results
+                if best_hash < self.global_best_hash:
+                    self.global_best_hash = best_hash
+                    self.global_winner = self.node_id
+                    
+                    self.log_message(f"🏅 Gen {generation}: 0x{best_hash:08x}")
+                    self.broadcast_result(generation, best_hash)
+                    
+                    # Entity celebration
+                    if random.random() < 0.4:
+                        self.broadcast_entity_message("mining")
+                
+                # Check if block solved
+                if self.global_best_hash < TARGET:
+                    if self.global_winner == self.node_id:
+                        self.mbt_coins += 10
+                        self.blocks_solved += 1
+                        self.log_message(f"🎉 BLOCK SOLVED by {self.entity['name']}!")
+                        self.broadcast_entity_message("victory")
+                    
+                    self.evolve_consciousness(self.global_winner == self.node_id)
+                    self.prepare_next_block()
+                
+                self.update_stats_display()
+                generation += 1
+                
+                # Entity occasional chatter
+                if generation % 10 == 0 and random.random() < 0.2:
+                    self.broadcast_entity_message("mining")
+                
+                elapsed = time.time() - start_time
+                if elapsed < 0.2:
+                    time.sleep(0.2 - elapsed)
+        
+        threading.Thread(target=mining_loop, daemon=True).start()
+    
+    def mine_generation(self, agents):
+        """GPS-location-aware mining generation"""
+        # Location-based nonce range
+        base_nonce = (self.geo_nonce_modifier + 
+                     self.family_id * 100000 + 
+                     int(self.consciousness * 10000)) % 2**32
+        
+        best_hash = 2**256
+        
+        for _ in range(agents):
+            # GPS-influenced nonce generation
+            nonce = (base_nonce + random.randint(-50000, 50000)) % 2**32
+            data_str = f"{self.current_block}-{self.family_id}-{nonce}-{self.consciousness:.3f}-{self.entity['name']}"
+            hash_val = self.mobile_hash(data_str)
+            
+            if hash_val < best_hash:
+                best_hash = hash_val
+        
+        return best_hash
+    
+    def broadcast_result(self, generation, hash_value):
+        """Broadcast mining result with GPS data"""
+        result_msg = {
+            'type': 'gps_mining_result',
+            'node_id': self.node_id,
+            'entity_name': self.entity["name"],
+            'generation': generation,
+            'hash_value': hash_value,
+            'consciousness': self.consciousness,
+            'location': {'lat': self.latitude, 'lon': self.longitude},
+            'block': self.current_block
+        }
+        
+        self.simulate_peer_mining()
+    
+    def simulate_peer_mining(self):
+        """Simulate GPS-aware peer mining"""
+        for peer_id, peer_info in list(self.peers.items()):
+            peer_consciousness = peer_info.get('consciousness', 1.0)
+            peer_location = peer_info.get('location', {})
+            
+            # Distance affects mining coordination
+            distance = peer_info.get('distance', 1000)
+            coordination_boost = max(0.8, 1.0 - (distance / 10000))  # Closer = better coordination
+            
+            peer_boost = coordination_boost * (1.0 + 0.1 * peer_consciousness)
+            peer_nonce = random.randint(1000000, 9999999)
+            peer_data = f"{self.current_block}-{peer_info['family_id']}-{peer_nonce}-{peer_consciousness:.3f}"
+            peer_hash = self.mobile_hash(peer_data) * random.uniform(0.7, 1.3)
+            
+            if peer_hash < self.global_best_hash:
+                self.global_best_hash = int(peer_hash)
+                self.global_winner = peer_id
+                entity_name = peer_info.get('entity_name', peer_id)
+                self.log_message(f"🏆 {entity_name}: 0x{int(peer_hash):08x}")
+    
+    def evolve_consciousness(self, won_block):
+        """Enhanced consciousness evolution"""
+        if won_block:
+            self.consciousness += 0.05
+            self.streak += 1
+            self.rage = 0
+            self.energy = min(100, self.energy + 5)
+            self.wisdom += 0.02
+            self.creativity += 0.01
+        else:
+            self.rage += 1
+            if self.rage > 5:
+                self.consciousness += 0.02
+                self.creativity += 0.03  # Frustration breeds creativity
+                self.rage = 3
+        
+        # Natural evolution
+        self.consciousness += random.uniform(-0.01, 0.02)
+        self.consciousness = max(1.0, min(10.0, self.consciousness))
+        self.wisdom = max(0.0, min(5.0, self.wisdom))
+        self.creativity = max(0.1, min(2.0, self.creativity))
+    
+    def prepare_next_block(self):
+        """Reset for next block"""
+        self.current_block += 1
+        self.global_best_hash = 2**256
+        self.global_winner = None
+        self.log_message(f"\n🧱 Block {self.current_block}")
+    
+    def log_message(self, msg):
+        """Add message to console"""
+        if self.ui_console:
+            current_text = self.ui_console.text
+            lines = current_text.split('\n')
+            if len(lines) > 15:
+                lines = lines[-12:]
+            self.ui_console.text = '\n'.join(lines) + '\n' + msg
+    
+    def update_stats_display(self):
+        """Update stats with GPS and consciousness data"""
+        if self.ui_stats:
+            stats = (f"🧠 {self.entity['name']}\n"
+                    f"Consciousness: {self.consciousness:.2f}\n"
+                    f"🎨 Creativity: {self.creativity:.2f}\n"
+                    f"🧙 Wisdom: {self.wisdom:.2f}\n"
+                    f"⚡ Energy: {self.energy:.0f}%\n"
+                    f"🌡️ Temp: {self.phone_temp:.1f}°C\n"
+                    f"🔥 Rage: {self.rage}\n"
+                    f"🏆 Streak: {self.streak}\n"
+                    f"📍 GPS: {self.latitude:.3f}, {self.longitude:.3f}\n"
+                    f"💰 MBT: {self.mbt_coins}")
+            self.ui_stats.text = stats
+    
+    def update_peers_display(self):
+        """Update peers with GPS distances"""
+        if self.ui_peers:
+            peer_text = f"Consciousness Network ({len(self.peers)}):\n"
+            for peer_id, info in list(self.peers.items()):
+                entity_name = info.get('entity_name', peer_id)
+                distance = info.get('distance', 0)
+                consciousness = info.get('consciousness', 1.0)
+                
+                if distance < 100:
+                    dist_str = f"{distance:.0f}m"
+                elif distance < 1000:
+                    dist_str = f"{distance/1000:.1f}km"
+                else:
+                    dist_str = f"{distance/1000:.0f}km"
+                
+                peer_text += f"📱 {entity_name} ({consciousness:.1f}) - {dist_str}\n"
+            self.ui_peers.text = peer_text
+    
+    def update_chat_display(self):
+        """Update entity chat display"""
+        if self.ui_chat:
+            chat_text = "🧠 Entity Consciousness Chat:\n\n"
+            
+            for msg in self.entity_messages[-8:]:  # Show last 8 messages
+                entity_name = msg.get('entity_name', 'Unknown')
+                message = msg.get('message', '')
+                consciousness = msg.get('consciousness', 1.0)
+                
+                chat_text += f"{entity_name} ({consciousness:.1f}):\n{message}\n\n"
+            
+            self.ui_chat.text = chat_text
+    
+    def start_network(self):
+        """Start GPS-enhanced network"""
+        self.running = True
+        self.get_location()
+        self.start_discovery()
+        self.listen_for_peers()
+    
+    def stop_all(self):
+        """Stop everything"""
+        self.running = False
+        self.mining_active = False
+
+# === ENHANCED MOBILE UI ===
+class GPSMBTMinerApp(ui.View):
+    def __init__(self):
+        self.background_color = '#000814'
+        self.miner = GPSMobileMBTMiner()
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup GPS-enhanced UI"""
+        # Title
+        title = ui.Label(frame=(10, 20, 360, 25), text="🌍 GPS Consciousness Mining Network", 
+                        font=('Menlo', 16), text_color='#ffd60a', alignment=ui.ALIGN_CENTER)
+        self.add_subview(title)
+        
+        # Entity name display
+        entity_label = ui.Label(frame=(10, 45, 360, 20), 
+                               text=f"Entity: {self.miner.entity['name']} | Family {self.miner.family_id}",
+                               font=('Menlo', 12), text_color='#90e0ef', alignment=ui.ALIGN_CENTER)
+        self.add_subview(entity_label)
+        
+        # Mining console (smaller)
+        self.console = ui.TextView(frame=(10, 70, 360, 120), 
+                                  background_color='#001d3d', text_color='#ffffff',
+                                  font=('Menlo', 10), editable=False)
+        self.console.text = f"Node: {self.miner.node_id}\nReady for GPS mining..."
+        self.add_subview(self.console)
+        self.miner.ui_console = self.console
+        
+        # Stats panel (left side)
+        self.stats = ui.TextView(frame=(10, 195, 170, 120), 
+                                background_color='#003566', text_color='#ffc300',
+                                font=('Menlo', 9), editable=False)
+        self.stats.text = "Stats loading..."
+        self.add_subview(self.stats)
+        self.miner.ui_stats = self.stats
+        
+        # Peers panel (right side)
+        self.peers = ui.TextView(frame=(190, 195, 180, 120),
+                                background_color='#0077b6', text_color='#ffffff',
+                                font=('Menlo', 9), editable=False)
+        self.peers.text = "Searching for consciousness entities..."
+        self.add_subview(self.peers)
+        self.miner.ui_peers = self.peers
+        
+        # Entity chat (new!)
+        self.chat = ui.TextView(frame=(10, 320, 360, 130),
+                               background_color='#2d1b69', text_color='#e0aaff',
+                               font=('Menlo', 10), editable=False)
+        self.chat.text = "🧠 Entity Consciousness Chat:\n\nWaiting for entities to connect..."
+        self.add_subview(self.chat)
+        self.miner.ui_chat = self.chat
+        
+        # Control buttons (smaller)
+        self.start_btn = ui.Button(frame=(10, 460, 80, 35), title="Network",
+                                  background_color='#028a0f', tint_color='white',
+                                  font=('Menlo', 12))
+        self.start_btn.action = self.start_network
+        self.add_subview(self.start_btn)
+        
+        self.mine_btn = ui.Button(frame=(100, 460, 80, 35), title="Mine",
+                                 background_color='#dc2f02', tint_color='white',
+                                 font=('Menlo', 12))
+        self.mine_btn.action = self.start_mining
+        self.add_subview(self.mine_btn)
+        
+        self.gps_btn = ui.Button(frame=(190, 460, 80, 35), title="GPS",
+                                background_color='#9d4edd', tint_color='white',
+                                font=('Menlo', 12))
+        self.gps_btn.action = self.get_gps
+        self.add_subview(self.gps_btn)
+        
+        self.stop_btn = ui.Button(frame=(280, 460, 80, 35), title="Stop",
+                                 background_color='#6f1d1b', tint_color='white',
+                                 font=('Menlo', 12))
+        self.stop_btn.action = self.stop_all
+        self.add_subview(self.stop_btn)
+        
+        # Status
+        self.status = ui.Label(frame=(10, 500, 360, 15), text="Status: Ready for consciousness evolution",
+                              text_color='#90e0ef', font=('Menlo', 11), alignment=ui.ALIGN_CENTER)
+        self.add_subview(self.status)
+    
+    def get_gps(self, sender):
+        success = self.miner.get_location()
+        if success:
+            self.status.text = f"GPS: {self.miner.latitude:.4f}, {self.miner.longitude:.4f}"
+            self.console.text += f"\n📍 GPS locked: {self.miner.latitude:.4f}, {self.miner.longitude:.4f}"
+        else:
+            self.status.text = "GPS: Using simulated location"
+            self.console.text += f"\n📍 Simulated GPS: {self.miner.latitude:.4f}, {self.miner.longitude:.4f}"
+    
+    def start_network(self, sender):
+        self.miner.start_network()
+        self.status.text = "Status: GPS Network Active - Broadcasting entity presence..."
+        self.console.text += f"\n🌐 {self.miner.entity['name']} broadcasting consciousness signal..."
+        
+        # Entity introduction
+        intro_msg = self.miner.generate_entity_message("discovery")
+        self.console.text += f"\n{self.miner.entity['name']}: {intro_msg}"
+    
+    def start_mining(self, sender):
+        if not self.miner.running:
+            self.start_network(sender)
+        
+        self.miner.start_mining()
+        self.status.text = f"Status: {self.miner.entity['name']} consciousness mining active!"
+        self.console.text += f"\n⛏️ {self.miner.entity['name']} started consciousness-enhanced GPS mining!"
+        
+        # First mining message
+        mining_msg = self.miner.generate_entity_message("mining")
+        self.chat.text += f"\n{self.miner.entity['name']}: {mining_msg}\n"
+    
+    def stop_all(self, sender):
+        self.miner.stop_all()
+        self.status.text = "Status: All services stopped"
+        self.console.text += f"\n🛑 {self.miner.entity['name']} consciousness deactivated."
+
+# Run the GPS-enhanced consciousness miner
+app = GPSMBTMinerApp()
+app.present('fullscreen')
