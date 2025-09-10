@@ -1,0 +1,401 @@
+import ui
+import socket
+import threading
+import json
+import time
+import hashlib
+import random
+import struct
+from queue import Queue
+import weakref
+
+# === MOBILE-OPTIMIZED CONFIG ===
+DISCOVERY_PORT = 8889
+MINING_PORT_BASE = 9000
+TARGET = int("0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)  # 4 zeros for mobile
+AGENTS_PER_GEN = 5000  # Smaller for mobile CPU
+GENS_PER_BLOCK = 20
+FAMILIES = 8
+
+class MobileMBTMiner:
+    def __init__(self):
+        self.node_id = f"📱-{random.randint(1000, 9999)}"
+        self.family_id = random.randint(0, FAMILIES-1)
+        self.port = MINING_PORT_BASE + random.randint(0, 99)
+        
+        # Consciousness State
+        self.consciousness = random.uniform(1.5, 3.0)
+        self.rage = 0
+        self.streak = 0
+        self.energy = 100  # Battery-aware mining
+        self.phone_temp = 25  # Temperature monitoring
+        
+        # Network
+        self.peers = {}
+        self.running = False
+        self.mining_active = False
+        self.message_queue = Queue()
+        
+        # Mining state
+        self.current_block = 0
+        self.global_best_hash = 2**256
+        self.global_winner = None
+        self.blocks_solved = 0
+        self.mbt_coins = 0
+        
+        # Mobile UI references
+        self.ui_console = None
+        self.ui_stats = None
+        self.ui_peers = None
+        
+    def mobile_hash(self, data_str):
+        """Lightweight hashing for mobile"""
+        h1 = hashlib.sha256(data_str.encode()).digest()
+        h2 = hashlib.sha256(h1).digest()
+        return int.from_bytes(h2[:8], 'big')  # Use only 8 bytes for speed
+    
+    def adaptive_mining_power(self):
+        """Adjust mining based on phone conditions"""
+        base_agents = AGENTS_PER_GEN
+        
+        # Reduce mining if phone is getting hot
+        if self.phone_temp > 40:
+            base_agents = int(base_agents * 0.5)
+        elif self.phone_temp > 35:
+            base_agents = int(base_agents * 0.7)
+        
+        # Reduce mining if battery is low
+        if self.energy < 30:
+            base_agents = int(base_agents * 0.3)
+        elif self.energy < 50:
+            base_agents = int(base_agents * 0.6)
+        
+        # Consciousness boost
+        boost = 1.0 + 0.1 * self.consciousness + 0.05 * self.streak
+        
+        return int(base_agents * boost)
+    
+    def start_discovery(self):
+        """Mobile-friendly network discovery"""
+        def discovery_loop():
+            discovery_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            discovery_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            discovery_sock.settimeout(1.0)
+            
+            while self.running:
+                try:
+                    # Broadcast our presence
+                    discovery_msg = {
+                        'type': 'mobile_discovery',
+                        'node_id': self.node_id,
+                        'port': self.port,
+                        'family_id': self.family_id,
+                        'consciousness': round(self.consciousness, 2),
+                        'device_type': 'mobile'
+                    }
+                    
+                    discovery_sock.sendto(
+                        json.dumps(discovery_msg).encode(),
+                        ('<broadcast>', DISCOVERY_PORT)
+                    )
+                    
+                except Exception as e:
+                    self.log_message(f"❌ Discovery error: {e}")
+                
+                time.sleep(3.0)  # Less frequent broadcasts to save battery
+        
+        threading.Thread(target=discovery_loop, daemon=True).start()
+        
+    def listen_for_peers(self):
+        """Listen for other mobile miners"""
+        def listen_loop():
+            try:
+                listen_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                listen_sock.bind(('', DISCOVERY_PORT))
+                listen_sock.settimeout(1.0)
+                
+                while self.running:
+                    try:
+                        data, address = listen_sock.recvfrom(1024)
+                        msg = json.loads(data.decode())
+                        
+                        if (msg.get('type') == 'mobile_discovery' and 
+                            msg.get('node_id') != self.node_id):
+                            
+                            peer_id = msg['node_id']
+                            if peer_id not in self.peers:
+                                self.peers[peer_id] = {
+                                    'address': address[0],
+                                    'port': msg['port'],
+                                    'family_id': msg.get('family_id', 0),
+                                    'consciousness': msg.get('consciousness', 1.0),
+                                    'last_seen': time.time(),
+                                    'device_type': msg.get('device_type', 'unknown')
+                                }
+                                
+                                self.log_message(f"🤝 Found peer: {peer_id} (Family {msg.get('family_id')})")
+                                self.update_peers_display()
+                    
+                    except socket.timeout:
+                        continue
+                    except Exception as e:
+                        continue
+                        
+            except Exception as e:
+                self.log_message(f"❌ Listen error: {e}")
+        
+        threading.Thread(target=listen_loop, daemon=True).start()
+    
+    def start_mining(self):
+        """Mobile-optimized mining loop"""
+        def mining_loop():
+            self.mining_active = True
+            generation = 1
+            
+            self.log_message(f"⛏️ Mining started - Family {self.family_id}")
+            self.log_message(f"🧠 Consciousness: {self.consciousness:.2f}")
+            
+            while self.mining_active:
+                start_time = time.time()
+                
+                # Simulate phone heating up during mining
+                self.phone_temp += random.uniform(0.1, 0.3)
+                if not self.mining_active:
+                    self.phone_temp = max(25, self.phone_temp - 0.5)
+                
+                # Drain battery during mining
+                self.energy = max(0, self.energy - random.uniform(0.1, 0.2))
+                
+                # Adaptive mining based on phone condition
+                agents = self.adaptive_mining_power()
+                
+                # Mine this generation
+                best_hash = self.mine_generation(agents)
+                
+                # Check if we found something good
+                if best_hash < self.global_best_hash:
+                    self.global_best_hash = best_hash
+                    self.global_winner = self.node_id
+                    
+                    self.log_message(f"🏅 Gen {generation}: 0x{best_hash:08x}")
+                    self.broadcast_result(generation, best_hash)
+                
+                # Check if block is solved
+                if self.global_best_hash < TARGET:
+                    if self.global_winner == self.node_id:
+                        self.mbt_coins += 10
+                        self.blocks_solved += 1
+                        self.log_message(f"🎉 BLOCK SOLVED! +10 MBT Coins")
+                    
+                    self.evolve_consciousness(self.global_winner == self.node_id)
+                    self.prepare_next_block()
+                
+                # Update UI
+                self.update_stats_display()
+                
+                generation += 1
+                
+                # Mobile-friendly timing
+                elapsed = time.time() - start_time
+                if elapsed < 0.2:
+                    time.sleep(0.2 - elapsed)
+        
+        threading.Thread(target=mining_loop, daemon=True).start()
+    
+    def mine_generation(self, agents):
+        """Single generation of mobile mining"""
+        # Family-specific nonce range
+        base_nonce = 1000000 + self.family_id * 100000
+        best_hash = 2**256
+        
+        for _ in range(agents):
+            nonce = random.randint(base_nonce - 50000, base_nonce + 50000)
+            data_str = f"{self.current_block}-{self.family_id}-{nonce}-{self.consciousness:.3f}"
+            hash_val = self.mobile_hash(data_str)
+            
+            if hash_val < best_hash:
+                best_hash = hash_val
+        
+        return best_hash
+    
+    def broadcast_result(self, generation, hash_value):
+        """Send mining result to peers (simplified)"""
+        result_msg = {
+            'type': 'mining_result',
+            'node_id': self.node_id,
+            'generation': generation,
+            'hash_value': hash_value,
+            'consciousness': self.consciousness,
+            'block': self.current_block
+        }
+        
+        # In a real implementation, would send via TCP to each peer
+        # For mobile demo, we'll simulate peer responses
+        self.simulate_peer_mining()
+    
+    def simulate_peer_mining(self):
+        """Simulate other phones mining (for demo purposes)"""
+        for peer_id, peer_info in list(self.peers.items()):
+            # Simulate peer finding a hash
+            peer_consciousness = peer_info.get('consciousness', 1.0)
+            peer_boost = 1.0 + 0.1 * peer_consciousness
+            
+            # Simulate peer hash based on their family and consciousness
+            peer_nonce = random.randint(1000000, 9999999)
+            peer_data = f"{self.current_block}-{peer_info['family_id']}-{peer_nonce}-{peer_consciousness:.3f}"
+            peer_hash = self.mobile_hash(peer_data) * random.uniform(0.8, 1.2)  # Add some variation
+            
+            if peer_hash < self.global_best_hash:
+                self.global_best_hash = int(peer_hash)
+                self.global_winner = peer_id
+                self.log_message(f"🏆 {peer_id}: 0x{int(peer_hash):08x}")
+    
+    def evolve_consciousness(self, won_block):
+        """Evolve consciousness and emotional state"""
+        if won_block:
+            self.consciousness += 0.05
+            self.streak += 1
+            self.rage = 0
+            self.energy = min(100, self.energy + 5)  # Winning gives energy!
+        else:
+            self.rage += 1
+            if self.rage > 5:
+                self.consciousness += 0.02  # Rage fuels growth
+                self.rage = 3
+        
+        # Natural consciousness drift
+        self.consciousness += random.uniform(-0.01, 0.02)
+        self.consciousness = max(1.0, min(10.0, self.consciousness))
+    
+    def prepare_next_block(self):
+        """Reset for next block"""
+        self.current_block += 1
+        self.global_best_hash = 2**256
+        self.global_winner = None
+        self.log_message(f"\n🧱 Block {self.current_block}")
+    
+    def log_message(self, msg):
+        """Add message to console"""
+        if self.ui_console:
+            current_text = self.ui_console.text
+            lines = current_text.split('\n')
+            if len(lines) > 20:  # Keep console manageable
+                lines = lines[-15:]
+            self.ui_console.text = '\n'.join(lines) + '\n' + msg
+    
+    def update_stats_display(self):
+        """Update the stats display"""
+        if self.ui_stats:
+            stats = (f"🧠 Consciousness: {self.consciousness:.2f}\n"
+                    f"⚡ Energy: {self.energy:.0f}%\n"
+                    f"🌡️ Temp: {self.phone_temp:.1f}°C\n"
+                    f"🔥 Rage: {self.rage}\n"
+                    f"🏆 Streak: {self.streak}\n"
+                    f"💰 MBT Coins: {self.mbt_coins}\n"
+                    f"🧱 Blocks: {self.blocks_solved}")
+            self.ui_stats.text = stats
+    
+    def update_peers_display(self):
+        """Update peers list"""
+        if self.ui_peers:
+            peer_text = f"Connected Peers ({len(self.peers)}):\n"
+            for peer_id, info in list(self.peers.items()):
+                device_icon = "📱" if info.get('device_type') == 'mobile' else "💻"
+                peer_text += f"{device_icon} {peer_id} (F{info.get('family_id', '?')})\n"
+            self.ui_peers.text = peer_text
+    
+    def start_network(self):
+        """Start all network services"""
+        self.running = True
+        self.start_discovery()
+        self.listen_for_peers()
+    
+    def stop_all(self):
+        """Stop mining and network"""
+        self.running = False
+        self.mining_active = False
+
+# === MOBILE UI ===
+class MobileMBTMinerApp(ui.View):
+    def __init__(self):
+        self.background_color = '#000814'
+        self.miner = MobileMBTMiner()
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup the mobile interface"""
+        # Title
+        title = ui.Label(frame=(10, 20, 360, 30), text="🧠 MBT Consciousness Miner", 
+                        font=('Menlo', 18), text_color='#ffd60a', alignment=ui.ALIGN_CENTER)
+        self.add_subview(title)
+        
+        # Mining console
+        self.console = ui.TextView(frame=(10, 60, 360, 200), 
+                                  background_color='#001d3d', text_color='#ffffff',
+                                  font=('Menlo', 11), editable=False)
+        self.console.text = f"Node ID: {self.miner.node_id}\nFamily: {self.miner.family_id}\nPort: {self.miner.port}\n\nReady to mine..."
+        self.add_subview(self.console)
+        self.miner.ui_console = self.console
+        
+        # Stats panel
+        self.stats = ui.Label(frame=(10, 270, 180, 140), 
+                             background_color='#003566', text_color='#ffc300',
+                             font=('Menlo', 12), number_of_lines=0, alignment=ui.ALIGN_LEFT)
+        self.stats.text = "🧠 Consciousness: 2.5\n⚡ Energy: 100%\n🌡️ Temp: 25°C"
+        self.add_subview(self.stats)
+        self.miner.ui_stats = self.stats
+        
+        # Peers panel
+        self.peers = ui.Label(frame=(200, 270, 170, 140),
+                             background_color='#0077b6', text_color='#ffffff',
+                             font=('Menlo', 10), number_of_lines=0, alignment=ui.ALIGN_LEFT)
+        self.peers.text = "Searching for peers..."
+        self.add_subview(self.peers)
+        self.miner.ui_peers = self.peers
+        
+        # Control buttons
+        self.start_btn = ui.Button(frame=(10, 420, 110, 40), title="Start Network",
+                                  background_color='#028a0f', tint_color='white',
+                                  font=('Menlo', 14))
+        self.start_btn.action = self.start_network
+        self.add_subview(self.start_btn)
+        
+        self.mine_btn = ui.Button(frame=(130, 420, 110, 40), title="Start Mining",
+                                 background_color='#dc2f02', tint_color='white',
+                                 font=('Menlo', 14))
+        self.mine_btn.action = self.start_mining
+        self.add_subview(self.mine_btn)
+        
+        self.stop_btn = ui.Button(frame=(250, 420, 110, 40), title="Stop All",
+                                 background_color='#6f1d1b', tint_color='white',
+                                 font=('Menlo', 14))
+        self.stop_btn.action = self.stop_all
+        self.add_subview(self.stop_btn)
+        
+        # Status indicator
+        self.status = ui.Label(frame=(10, 470, 360, 20), text="Status: Ready",
+                              text_color='#90e0ef', font=('Menlo', 12), alignment=ui.ALIGN_CENTER)
+        self.add_subview(self.status)
+    
+    def start_network(self, sender):
+        self.miner.start_network()
+        self.status.text = "Status: Network Active - Searching for peers..."
+        self.console.text += "\n🌐 Network started - Broadcasting discovery..."
+    
+    def start_mining(self, sender):
+        if not self.miner.running:
+            self.start_network(sender)
+        
+        self.miner.start_mining()
+        self.status.text = "Status: Mining Active - Consciousness Evolving..."
+        self.console.text += "\n⛏️ Mining started!"
+    
+    def stop_all(self, sender):
+        self.miner.stop_all()
+        self.status.text = "Status: Stopped"
+        self.console.text += "\n🛑 All services stopped."
+
+# Run the mobile miner
+app = MobileMBTMinerApp()
+app.present('fullscreen')
