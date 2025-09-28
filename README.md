@@ -4,8 +4,7 @@
 
 
 
-by Martin Ollett — First Minter of the Motion Economy
-
+by Martin Ollett 
 
 
 
